@@ -1,0 +1,22 @@
+# macOS system files
+.DS_Store
+
+# Python cache
+__pycache__/
+
+# Model weights
+results/
+*.pt
+
+# Vscode specific files
+.vscode/
+
+# Jupyter notebook stuff
+.virtual_documents/*
+.ipynb_checkpoints/*
+
+# Slurm scripts
+slurm_scripts/
+
+# Offline MOO data
+offline_moo/data/

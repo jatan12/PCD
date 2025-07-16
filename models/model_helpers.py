@@ -1,0 +1,308 @@
+import random
+import argparse
+from dataclasses import dataclass, field
+from typing import List, Tuple, Optional, Dict
+
+import numpy as np
+import scipy
+import torch
+
+from pygmo import fast_non_dominated_sorting
+from pymoo.factory import get_reference_directions
+from pymoo.algorithms.moo.nsga2 import calc_crowding_distance
+from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
+
+
+@dataclass
+class TaskConfig:
+    seed: int = 42
+    task_name: str = ""
+    data_pruning: bool = False
+    data_preserved_ratio: float = 0.2
+    normalize_xs: bool = False
+    normalize_ys: bool = False
+    normalize_method_xs: str = "z-score"
+    normalize_method_ys: str = "min-max"
+    num_pareto_solutions: int = 256
+    use_val_split: bool = True
+    val_ratio: float = 0.2
+    gin_config_files: List[str] = field(default_factory=list)
+    gin_params: List[str] = field(default_factory=list)
+
+
+@dataclass
+class SyntheticConfig(TaskConfig):
+    task_name: str = "dtlz1"
+    normalize_xs: bool = True
+    normalize_ys: bool = True
+    gin_config_files: List[str] = field(default_factory=lambda:
+                                        ["./config/synthetic.gin"])
+    gin_params: List[str] = field(default_factory=list)
+
+
+@dataclass
+class ScientificConfig(TaskConfig):
+    task_name: str = "rfp"
+    normalize_xs: bool = False
+    normalize_ys: bool = True
+    gin_config_files: List[str] = field(default_factory=lambda:
+                                        ["./config/scientific.gin"])
+    gin_params: List[str] = field(default_factory=list)
+
+    def __post_init__(self):
+        # Override normalize_xs if the task is "molecule"
+        if self.task_name.lower() == "molecule":
+            self.normalize_xs = True
+
+
+def get_task_config(domain: str):
+    domain_to_config = {
+        "synthetic": SyntheticConfig,
+        "scientific": ScientificConfig,
+    }
+    if domain not in domain_to_config:
+        raise ValueError(
+            f"Unknown domain: {domain}. "
+            f"Available domains: {list(domain_to_config.keys())}"
+        )
+    return domain_to_config[domain]
+
+
+def parse_args() -> TaskConfig:
+    parser = argparse.ArgumentParser(description="Diffusion Model Configs")
+
+    parser.add_argument('--seed', type=int, default=42,
+                        help="Random seed (default: 42)")
+    parser.add_argument('--task_name', type=str, default="dtlz1",
+                        help="Subtask name (e.g., dtlz1, rfp)")
+    parser.add_argument(
+        '--domain',
+        type=str,
+        required=True,
+        choices=["synthetic", "scientific", "morl", "re"],
+        help="Task domain (eg. synthetic, scientific)"
+    )
+    parser.add_argument('--data_pruning', action='store_true',
+                        help="Enable pruning of dominated data")
+    parser.add_argument(
+        '--data_preserved_ratio',
+        type=float,
+        default=0.2,
+        help=(
+            "Fraction of data to preserve when pruning "
+            "(default: 0.2)"
+        )
+    )
+
+    args = parser.parse_args()
+    ConfigClass = get_task_config(args.domain)
+
+    config = ConfigClass(
+        seed=args.seed,
+        task_name=args.task_name,
+        data_pruning=args.data_pruning,
+        data_preserved_ratio=args.data_preserved_ratio
+    )
+
+    return config
+
+
+def set_seed(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    global now_seed
+    now_seed = seed
+
+
+def get_pareto_front(y):
+    """
+    Estimates the Pareto front using NonDominatedSorting from pymoo.
+
+    Args:
+        y (np.ndarray): Array of shape (n_samples, n_objectives) with
+                        objective values for multi-objective optimization.
+
+    Returns:
+        tuple: (pareto_points, pareto_indices)
+            - pareto_points (np.ndarray): Non-dominated objective vectors.
+            - pareto_indices (np.ndarray): Idx of the non-dominated points in y
+    """
+    nds = (
+        NonDominatedSorting()
+    )  # Use "efficient_non_dominated_sort" for larger datasets
+    front_indices = nds.do(y, only_non_dominated_front=True)
+    return y[front_indices], front_indices
+
+
+def reweight_multi_objective(
+    scores: np.ndarray,
+    num_bins: int = 20,
+    k: float = 0.01,
+    tau: float = 1000.0,
+    maximize: bool = False,
+    normalize_dom_counts: bool = True,
+) -> np.ndarray:
+    """
+    Compute sample weights for multi-objective optimization problems using
+    dominance rank and bin frequency to encourage Pareto-optimality & coverage.
+
+    Parameters
+    ----------
+    scores : np.ndarray
+        A (N, D) array of objective values where N is the number of samples
+        and D is the number of objectives.
+    bins : int
+        Number of bins for each dimension in histogramdd.
+    k : float
+        Small constant controlling the penalty for overrepresented bins.
+    tau : float
+        Temperature parameter controlling how strongly the dominance depth
+        affects weights.
+    maximize : bool
+        If True, assumes maximization; otherwise, minimization.
+    normalize_dom_counts: bool
+        If True, min-max normalize dominance numbers (
+                easier to setup task independent hyperparams
+        )
+    Returns
+    -------
+    weights : np.ndarray
+        A (N,) array of sample weights.
+    """
+    assert scores.ndim == 2, (
+        f"Expected 2D array for scores, got shape {scores.shape}"
+    )
+    scores_proc = scores.copy()
+
+    # Pygmo assumes minimization; invert if maximizing
+    if maximize:
+        scores_proc = -scores_proc
+
+    _, _, dc, _ = fast_non_dominated_sorting(points=scores_proc)
+    if normalize_dom_counts:
+        dc = (dc - dc.min()) / (dc.max() - dc.min())
+
+    hist, _, binnum = scipy.stats.binned_statistic_dd(
+        scores_proc,
+        values=None,
+        statistic="count",
+        bins=num_bins,
+        expand_binnumbers=False,
+    )
+    weights = np.zeros(scores_proc.shape[0])
+    unique_bins = np.unique(binnum)
+    for i in range(unique_bins.shape[0]):
+        mask = binnum == unique_bins[i]
+        n_items = mask.sum()
+        weights[mask] = (
+            n_items / (n_items + k)
+            * np.exp(-dc[mask].mean() / tau)
+        )
+
+    return weights
+
+
+def sample_uniform_toward_ideal(
+    d_best: np.ndarray,
+    k: int,
+    alpha_range: Tuple[float, float] = (0.1, 0.4),
+    noise_scale: float = 0.05,
+) -> np.ndarray:
+    """
+    Uniformly interpolates between d_best points and pareto ideal
+    then adds noise for exploration.
+
+    The ideal is computed as the min of d_best.
+    The nadir is computed as the max of d_best.
+
+    Parameters:
+        d_best (np.ndarray): Array of current best solutions (e.g., PF).
+                             Shape (num_points, num_objectives).
+
+        k (int): Number of conditioning points to generate.
+
+        alpha_range (tuple[float, float]): Tuple specifying (min, max)
+                                           for interpolation scalar.
+
+        noise_scale (float): Standard deviation of the Gaussian noise to add.
+                             This is a key hyperparameter for exploration.
+    Returns:
+        np.ndarray: Noisy conditioning points,
+                    clipped within the ideal and nadir bounds.
+    """
+    ideal_point = d_best.min(axis=0, keepdims=True)
+    nadir_point = d_best.max(axis=0, keepdims=True)
+
+    idx = np.random.choice(len(d_best), size=k, replace=True)
+    base = d_best[idx]
+
+    min_alpha, max_alpha = alpha_range
+    alphas = np.random.uniform(min_alpha, max_alpha, size=(k, 1))
+
+    directions = ideal_point - base  # minimization direction
+    cond_points = base + alphas * directions
+
+    noise = np.random.normal(
+        loc=0.0,
+        scale=noise_scale,
+        size=cond_points.shape
+    )
+    noisy_points = cond_points + noise
+
+    return np.clip(noisy_points, a_min=ideal_point, a_max=nadir_point)
+
+
+def sample_along_reference_vectors(
+    d_best: np.ndarray,
+    k: int,
+    seed: int = 42,
+    method: str = "energy",
+    alpha_range: Tuple[float, float] = (0.1, 0.3),
+    bounds: Tuple[float, float] = (0., 1.),
+) -> np.ndarray:
+    """
+    Sample k points by moving inward from a normalized Pareto front
+    along reference directions.
+
+    Args:
+        d_best (np.ndarray): Normalized Pareto front, shape (N, M).
+        k (int): Number of points to sample.
+        seed (int): Random seed.
+        method (str): Reference direction generation method.
+        alpha_range (tuple): Range for step sizes toward the ideal point.
+        bounds (tuple): Clipping bounds for sampled points.
+
+    Returns:
+        np.ndarray: Sampled points of shape (k, M).
+    """
+    np.random.seed(seed)
+    n_obj = d_best.shape[1]
+
+    # Generate reference directions (assumed normalized)
+    ref_dirs = get_reference_directions(method, n_obj, k, seed=seed)
+
+    # Compute crowding distances and sanitize them
+    crowding_dist = calc_crowding_distance(d_best)
+    finite_max = np.nanmax(crowding_dist[np.isfinite(crowding_dist)])
+    crowding_dist = np.where(np.isinf(crowding_dist),
+                             finite_max * 10, crowding_dist)
+    crowding_dist = np.nan_to_num(crowding_dist, nan=0.0)
+
+    # Normalize to get sampling probabilities or fallback to uniform
+    total_dist = np.sum(crowding_dist)
+    prob = crowding_dist / total_dist if total_dist > 0 else None
+
+    # Sample base points from d_best weighted by crowding distance
+    idx = np.random.choice(len(d_best), size=k, replace=True, p=prob)
+    base_points = d_best[idx]
+
+    # Sample step sizes and move inward along reference directions
+    alphas = np.random.uniform(*alpha_range, size=(k, 1))
+    sampled_points = base_points - alphas * ref_dirs
+
+    # Clip points within bounds
+    return np.clip(sampled_points, bounds[0], bounds[1])
