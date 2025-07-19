@@ -71,8 +71,8 @@ def get_task_config(domain: str):
 def parse_args() -> TaskConfig:
     parser = argparse.ArgumentParser(description="Diffusion Model Configs")
 
-    parser.add_argument('--seed', type=int, default=42,
-                        help="Random seed (default: 42)")
+    parser.add_argument('--seed', type=int, default=1000,
+                        help="Random seed (default: 1000)")
     parser.add_argument('--task_name', type=str, default="dtlz1",
                         help="Subtask name (e.g., dtlz1, rfp)")
     parser.add_argument(

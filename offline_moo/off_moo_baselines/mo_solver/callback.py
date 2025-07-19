@@ -50,6 +50,9 @@ class RecordCallback:
             if self.config["normalize_ys"]:
                 nadir_point = self.task.normalize_y(nadir_point)
                 y_real = self.task.normalize_y(y_real)
+            
+            nadir_point = nadir_point.reshape(-1)
+            
             hv_value = hv(
                 nadir_point=nadir_point, y=y_real, task_name=self.config["task"]
             )

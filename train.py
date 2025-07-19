@@ -254,8 +254,6 @@ def evaluation(
             - hv_75th: HV of top 75% solutions
             - hv_50th: HV of top 50% solutions
     """
-    task_name = config.task_name.lower()
-
     res_y_75_percent = get_quantile_solutions(res_y, 0.75)
     res_y_50_percent = get_quantile_solutions(res_y, 0.50)
 
@@ -267,6 +265,8 @@ def evaluation(
     res_y_75_percent = task.normalize_y(
         res_y_75_percent, normalization_method="min-max"
     )
+
+    task_name = config.task_name.lower()
 
     nadir_point = task.nadir_point
     nadir_point = task.normalize_y(nadir_point, normalization_method="min-max")

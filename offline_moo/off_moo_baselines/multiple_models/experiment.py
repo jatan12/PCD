@@ -88,12 +88,12 @@ def run(config: dict):
         X_test = task.to_logits(X_test)
     if config["normalize_xs"]:
         task.map_normalize_x()
-        X = task.normalize_x(X, method="min-max")
-        X_test = task.normalize_x(X_test, method="min-max")
+        X = task.normalize_x(X)
+        X_test = task.normalize_x(X_test)
     if config["normalize_ys"]:
         task.map_normalize_y()
-        y = task.normalize_y(y, method="min-max")
-        y_test = task.normalize_y(y_test, method="min-max")
+        y = task.normalize_y(y)
+        y_test = task.normalize_y(y_test)
 
     if config["to_logits"]:
         data_size, n_dim, n_classes = tuple(X.shape)
@@ -187,7 +187,7 @@ def run(config: dict):
         batch_size=config["num_solutions"],
         pop_size=config["num_solutions"],
         algo=NSGA2,
-        callback=callback if config["record_hist"] else None,
+        callback=None,  # callback if config["record_hist"] else None,
         eliminate_duplicates=True,
         **genetic_operators,
     )
@@ -199,7 +199,7 @@ def run(config: dict):
         res_x = res_x.reshape(-1, n_dim, n_classes)
     if config["normalize_xs"]:
         task.map_denormalize_x()
-        res_x = task.denormalize_x(res_x, method="min-max")
+        res_x = task.denormalize_x(res_x)
     if config["to_logits"]:
         task.map_to_integers()
         res_x = task.to_integers(res_x)
@@ -214,30 +214,38 @@ def run(config: dict):
     res_y_75_percent = get_quantile_solutions(res_y, 0.75)
     res_y_50_percent = get_quantile_solutions(res_y, 0.50)
 
+    # For eval use min max
+    _, d_best = task.get_N_non_dominated_solutions(
+        N=config["num_solutions"], return_x=False, return_y=True
+    )
+
     nadir_point = task.nadir_point
-    # For calculating hypervolume, we use the min-max normalization
+
     if config["normalize_ys"]:
         res_y = task.normalize_y(res_y, normalization_method="min-max")
-        nadir_point = task.normalize_y(nadir_point, normalization_method="min-max")
+        nadir_point = task.normalize_y(nadir_point,
+                                       normalization_method="min-max")
         res_y_50_percent = task.normalize_y(
             res_y_50_percent, normalization_method="min-max"
         )
         res_y_75_percent = task.normalize_y(
             res_y_75_percent, normalization_method="min-max"
         )
-
-    _, d_best = task.get_N_non_dominated_solutions(
-        N=config["num_solutions"], return_x=False, return_y=True
-    )
+        d_best = task.normalize_y(d_best, normalization_method="min-max")
 
     np.save(file=os.path.join(logging_dir, "res_x.npy"), arr=res_x)
     np.save(file=os.path.join(logging_dir, "res_y.npy"), arr=res_y)
-    plot_y(
-        res_y,
-        save_dir=logging_dir,
-        config=config,
-        nadir_point=nadir_point,
-        d_best=d_best,
+
+#    plot_y(
+#        res_y,
+#        save_dir=logging_dir,
+#        config=config,
+#        nadir_point=nadir_point,
+#        d_best=d_best,
+#    )
+
+    nadir_point = nadir_point.reshape(
+        -1,
     )
 
     d_best_hv = hv(nadir_point, d_best, config["task"])
@@ -255,7 +263,7 @@ def run(config: dict):
         "hypervolume/100th": hv_value,
         "hypervolume/75th": hv_value_75_percentile,
         "hypervolume/50th": hv_value_50_percentile,
-        "evaluation_step": 1,
+        # "evaluation_step": 1,
     }
 
     df = pd.DataFrame([hv_results])

@@ -1,33 +1,26 @@
 #!/bin/bash
 
-# Synthetic Functions 
-# "dtlz1 dtlz2 dtlz3 dtlz4 dtlz5 dtlz6 dtlz7 zdt1 zdt2 zdt3 zdt4 zdt6 vlmop1 vlmop2 vlmop3 omnitest"
+# Synthetic Functions
+synthetic="dtlz1 dtlz7 omnitest vlmop1 vlmop2 vlmop3 zdt1 zdt2 zdt3 zdt4 zdt6"
 
 # RE
-# "re21 re22 re23 re24 re25 re31 re32 re33 re34 re35 re36 re37 re41 re42 re61"
-
-# MO-NAS
-# "nb201_test c10mop1 c10mop2 c10mop3 c10mop4 c10mop5 c10mop6 c10mop7 c10mop8 c10mop9 in1kmop1 in1kmop2 in1kmop3 in1kmop4 in1kmop5 in1kmop6 in1kmop7 in1kmop8 in1kmop9"
+re="re21 re22 re23 re24 re25 re31 re32 re33 re34 re35 re36 re37 re41 re42 re61"
 
 # MORL
-# "mo_hopper_v2 mo_swimmer_v2"
-
-# MOCO 
-# "bi_tsp_20 bi_tsp_50 bi_tsp_100 bi_tsp_500 tri_tsp_20 tri_tsp_50 tri_tsp_100 bi_cvrp_20 bi_cvrp_50 bi_cvrp_100 bi_kp_50 bi_kp_100 bi_kp_200"
+morl="mo_hopper_v2 mo_swimmer_v2"
 
 # Scientific Design
-# "zinc regex rfp molecule"
+scientific="molecule regex rfp zinc"
 
-seeds="1000"
-tasks="dtlz1"
+seeds="1000 2000 3000 4000 5000"
+tasks="$synthetic $re $morl $scientific"
 model="MultipleModels"
-#train_modes="Vallina COM IOM RoMA ICT TriMentoring"
-train_modes="Vallina"
-# "Vallina COM IOM RoMA ICT TriMentoring"
+train_modes="Vallina COM IOM RoMA ICT TriMentoring"
 
-MAX_JOBS=1
+MAX_JOBS=2
 AVAILABLE_GPUS="0"
-MAX_RETRIES=1
+MAX_RETRIES=0
+job_number=0
 
 get_gpu_allocation() {
     local job_number=$1
@@ -76,6 +69,7 @@ for seed in $seeds; do
         check_jobs
         gpu_allocation=$(get_gpu_allocation $job_number)
         ((job_number++))
+        echo "Running seed=$seed task=$task train_mode=$train_mode on GPU $gpu_allocation"
         run_with_retry "offline_moo/off_moo_baselines/multiple_models/experiment.py \
             --model=${model} \
             --train_mode=${train_mode} \

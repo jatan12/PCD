@@ -20,3 +20,5 @@ slurm_scripts/
 
 # Offline MOO data
 offline_moo/data/
+offline_moo/results/
+offline_moo/model/
