@@ -3,13 +3,11 @@
 # Define your config values
 synthetic="dtlz1 dtlz7 omnitest vlmop1 vlmop2 vlmop3 zdt1 zdt2 zdt3 zdt4 zdt6"
 re="re21 re22 re23 re24 re25 re31 re32 re33 re34 re35 re36 re37 re41 re42 re61"
-morl="mo_hopper_v2 mo_swimmer_v2"
-scientific="molecule regex rfp zinc"
+morl="mo_hopper_v2 mo_swimmer_v2"  # Not used in the cluster
+scientific="molecule regex rfp zinc"  # molecule doesn't work on cluster
 
-tasks="dtlz1" #"$synthetic $re $morl $scientific"
-seeds="1000" #"1000 2000 3000 4000 5000"
-model="MOBO"
-train_mode="Vallina" # ParEGO JES"
+tasks="rfp"  # maybe rfp as well
+seeds="4000 5000"
 
 # Create the full list of combinations
 configs=()
@@ -28,11 +26,9 @@ for config in "${configs[@]}"; do
     seed=$(echo $config | awk '{print $1}')
     task=$(echo $config | awk '{print $2}')
     echo "Running seed=$seed task=$task on GPU $GPU_ID"
-    python offline_moo/off_moo_baselines/mobo/experiment.py \
-        --seed=${seed} \
-        --task=${task} \
-        --model=${model} \
-        --train_mode=${train_mode} \
-        --use_wandb=False \
-        --retrain_model=False
+    python offline_moo/off_moo_baselines/paretoflow/experiment.py \
+        --task="${task}" \
+        --fm_epochs=1000 \
+        --fm_batch_size=128 \
+        --seed="${seed}"
 done

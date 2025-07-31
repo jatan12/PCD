@@ -1,6 +1,6 @@
 data_pruning: False 
 
-permutation_n_gen: 200
-sequence_n_gen: 200
+permutation_n_gen: 100
+sequence_n_gen: 100
 
-train_gp_data_size: 256
+train_gp_data_size: 128

@@ -1,10 +1,10 @@
-results_dir: ./results 
-model_save_dir: ./model 
+results_dir: ./results/MOBO 
+model_save_dir: ./model
 
 use_wandb: False 
 run_type: train 
 
-seed: 2024 
+seed: 2024
 retrain_model: True 
 num_solutions: 256
 

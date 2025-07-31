@@ -13,13 +13,13 @@ morl="mo_hopper_v2 mo_swimmer_v2"
 scientific="molecule regex rfp zinc"
 
 seeds="1000 2000 3000 4000 5000"
-tasks="$synthetic $re $morl $scientific"
+tasks="molecule" # $synthetic $re $morl $scientific"
 model="MultipleModels"
-train_modes="Vallina COM IOM RoMA ICT TriMentoring"
+train_modes="Vallina COM IOM ICT TriMentoring" # Vallina COM IOM RoMA ICT TriMentoring
 
 MAX_JOBS=2
 AVAILABLE_GPUS="0"
-MAX_RETRIES=0
+MAX_RETRIES=1
 job_number=0
 
 get_gpu_allocation() {
