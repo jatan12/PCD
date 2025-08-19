@@ -360,6 +360,7 @@ class ElucidatedDiffusion(nn.Module):
     def forward(
         self,
         inputs: torch.Tensor,
+        weights: torch.Tensor,
         cond: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         self.train()  # ensure the model is in training mode
@@ -397,6 +398,7 @@ class ElucidatedDiffusion(nn.Module):
         losses = losses * self.loss_weight(
             sigmas
         )  # Reweighted loss goes over here
+        losses = losses * weights
         return losses.mean()
 
 
@@ -591,8 +593,8 @@ class Trainer(object):
         count = 0
 
         for batch in self.val_dl:
-            x, y = (t.to(self.accelerator.device) for t in batch)
-            loss = self.model(x, cond=y)
+            x, y, w= (t.to(self.accelerator.device) for t in batch)
+            loss = self.model(x, weights=w, cond=y)
             total_val_loss += loss.item()
             count += 1
 
@@ -614,11 +616,11 @@ class Trainer(object):
                 total_loss = 0.0
 
                 for _ in range(self.gradient_accumulate_every):
-                    x, y = (
+                    x, y, w = (
                         t.to(device) for t in next(self.dl)
                     )  # data = (next(self.dl)[0]).to(device)
                     with self.accelerator.autocast():
-                        loss = self.model(x, cond=y)
+                        loss = self.model(x, weights=w, cond=y)
                         loss = loss / self.gradient_accumulate_every
                         total_loss += loss.item()
                     self.accelerator.backward(loss)

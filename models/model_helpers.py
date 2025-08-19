@@ -17,6 +17,7 @@ from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
 class TaskConfig:
     seed: int = 42
     task_name: str = ""
+    reweight_loss: bool = False
     data_pruning: bool = False
     data_preserved_ratio: float = 0.2
     normalize_xs: bool = False
@@ -82,8 +83,16 @@ def parse_args() -> TaskConfig:
         choices=["synthetic", "scientific", "morl", "re"],
         help="Task domain (eg. synthetic, scientific)"
     )
-    parser.add_argument('--data_pruning', action='store_true',
-                        help="Enable pruning of dominated data")
+    parser.add_argument(
+            '--reweight-loss',
+            action='store_true',
+            help='Enable loss reweighting based on dominance number'
+    )
+    parser.add_argument(
+            '--data_pruning', 
+            action='store_true',
+            help="Enable pruning of dominated data"
+    )
     parser.add_argument(
         '--data_preserved_ratio',
         type=float,
@@ -100,6 +109,7 @@ def parse_args() -> TaskConfig:
     config = ConfigClass(
         seed=args.seed,
         task_name=args.task_name,
+        reweight_loss=args.reweight_loss,
         data_pruning=args.data_pruning,
         data_preserved_ratio=args.data_preserved_ratio
     )

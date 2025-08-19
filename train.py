@@ -133,20 +133,35 @@ def train_diffusion(
         config.gin_config_files,
         config.gin_params
     )
-
+    
     X_train_tensor = torch.from_numpy(X_train).float()
     y_train_tensor = torch.from_numpy(y_train).float()
-    train_dataset = torch.utils.data.TensorDataset(
-        X_train_tensor,
-        y_train_tensor
+    if config.reweight_loss:
+        print("Using reweighted loss")
+        weights = reweight_multi_objective(y_train, num_bins=20)
+        weights_tensor = torch.from_numpy(weights).float()
+    else:        
+        print("Using standard loss")
+        weights_tensor = torch.ones(X_train_tensor.shape[0]).float()
+
+    assert weights_tensor.shape[0] == X_train_tensor.shape[0], (
+            f"Mismatch of shapes for X and weights: {X_train_tensor.shape=} "
+            f"!= {weights_tensor.shape=}"
     )
 
+    train_dataset = torch.utils.data.TensorDataset(
+        X_train_tensor,
+        y_train_tensor,
+        weights_tensor
+    )
     if X_val is not None and y_val is not None:
         X_val_tensor = torch.from_numpy(X_val).float()
         y_val_tensor = torch.from_numpy(y_val).float()
+        val_weights = torch.ones(y_val.shape[0]).float() 
         val_dataset = torch.utils.data.TensorDataset(
             X_val_tensor,
-            y_val_tensor
+            y_val_tensor,
+            val_weights
         )
     else:
         val_dataset = None
@@ -315,7 +330,6 @@ def main():
     print("Configuration:")
     pprint(config.__dict__)
     print()
-
     task, X, y, d_best = create_task(config)
 
     trainer = train_diffusion(config, X, y)
