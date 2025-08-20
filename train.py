@@ -8,7 +8,7 @@ import datetime
 import torch
 import numpy as np
 from sklearn.model_selection import train_test_split
-
+import wandb
 import offline_moo.off_moo_bench as ob
 from offline_moo.utils import get_quantile_solutions
 from offline_moo.off_moo_bench.task_set import ALLTASKSDICT
@@ -334,11 +334,11 @@ def setup_wandb(config):
     })
     run_name = f"{config.task_name}-{config.seed}"
     wandb.init(
-            run_name=run_name, 
+            name=run_name, 
             job_type="train", 
             config=config,
             group=experiment_name,
-            tags=[config.task_name, config.domain],
+            tags=[config.task_name],
             save_code=False
     )
 
