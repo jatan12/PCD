@@ -1,6 +1,8 @@
+import os
 import random
 import argparse
 from dataclasses import dataclass, field
+import pathlib
 from typing import List, Tuple, Optional, Dict
 
 import numpy as np
@@ -29,6 +31,8 @@ class TaskConfig:
     val_ratio: float = 0.2
     gin_config_files: List[str] = field(default_factory=list)
     gin_params: List[str] = field(default_factory=list)
+    use_wandb: bool = False
+    save_dir: Optional[pathlib.Path] = None
 
 
 @dataclass
@@ -73,7 +77,7 @@ def parse_args() -> TaskConfig:
     parser = argparse.ArgumentParser(description="Diffusion Model Configs")
 
     parser.add_argument('--seed', type=int, default=1000,
-                        help="Random seed (default: 1000)")
+                        help="Random seed (default: %(default)s)")
     parser.add_argument('--task_name', type=str, default="dtlz1",
                         help="Subtask name (e.g., dtlz1, rfp)")
     parser.add_argument(
@@ -99,9 +103,16 @@ def parse_args() -> TaskConfig:
         default=0.2,
         help=(
             "Fraction of data to preserve when pruning "
-            "(default: 0.2)"
+            "(default: %(default)s)"
         )
     )
+
+    parser.add_argument(
+            '--use_wandb',
+            action='store_true',
+            help='Enables logging to Weights and biases'
+    )
+    parser.add_argument("--save_dir", type=pathlib.Path, default=None)
 
     args = parser.parse_args()
     ConfigClass = get_task_config(args.domain)
@@ -111,11 +122,26 @@ def parse_args() -> TaskConfig:
         task_name=args.task_name,
         reweight_loss=args.reweight_loss,
         data_pruning=args.data_pruning,
-        data_preserved_ratio=args.data_preserved_ratio
+        data_preserved_ratio=args.data_preserved_ratio,
+        use_wandb=args.use_wandb,
+        save_dir=args.save_dir
     )
 
     return config
 
+
+def get_slurm_job_id():
+    """ Retrieve job-id from slurm if applicable  """
+    job_id = os.environ.get("SLURM_ARRAY_JOB_ID", None)
+    if job_id is None:
+        job_id = os.environ.get("SLURM_JOB_ID", None)
+    return int(job_id) if job_id is not None else job_id
+
+
+def get_slurm_task_id():
+    """ Retrieve task array id from slurm if applicable  """
+    task_id = os.environ.get("SLURM_ARRAY_TASK_ID", None)
+    return int(task_id) if task_id is not None else task_id
 
 def set_seed(seed: int) -> None:
     random.seed(seed)

@@ -425,13 +425,13 @@ class Trainer(object):
         amp: bool = False,
         fp16: bool = False,
         split_batches: bool = True,
-        wandb_handle: None = None,
+        use_wandb: bool = False,
     ):
         super().__init__()
-
-        self.wandb_handle = wandb_handle
-        if self.wandb_handle is not None:
-            self.wandb_handle.config.update(
+        
+        self.use_wandb = use_wandb
+        if self.use_wandb:
+            wandb.config.update(
                 {
                     "split_batches": split_batches,
                     "train_batch_size": train_batch_size,
@@ -627,8 +627,8 @@ class Trainer(object):
 
                 accelerator.clip_grad_norm_(self.model.parameters(), 1.0)
                 pbar.set_description(f"loss: {total_loss:.4f}")
-                if self.wandb_handle is not None:
-                    self.wandb_handle.log(
+                if self.use_wandb:
+                    wandb.log(
                         {
                             "step": self.step,
                             "loss": total_loss,
@@ -659,8 +659,8 @@ class Trainer(object):
                                 f"Validation loss at step {self.step}: "
                                 f"{val_loss:.4f}"
                             )
-                            if self.wandb_handle is not None:
-                                self.wandb_handle.log(
+                            if self.use_wandb: 
+                                wandb.log(
                                     {
                                         "step": self.step,
                                         "val_loss": val_loss,

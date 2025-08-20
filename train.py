@@ -1,7 +1,10 @@
 from pprint import pprint
 from typing import Tuple, Dict
 
+from dataclasses import asdict
 import gin
+import json
+import datetime
 import torch
 import numpy as np
 from sklearn.model_selection import train_test_split
@@ -18,6 +21,8 @@ from models.model_helpers import (
     set_seed,
     reweight_multi_objective,
     sample_uniform_toward_ideal,
+    get_slurm_job_id,
+    get_slurm_task_id
 )
 
 
@@ -174,7 +179,8 @@ def train_diffusion(
     trainer = elucidated_diffusion.Trainer(
         diffusion,
         train_dataset,
-        val_dataset
+        val_dataset,
+        use_wandb=config.use_wandb
     )
 
     trainer.train()
@@ -310,6 +316,27 @@ def evaluation(
     return results
 
 
+def setup_wandb(config):
+    now = datetime.datetime.now()
+    ts = now.strftime("%Y-%m-%dT%H-%M")
+
+    cfg = asdict(config)
+
+
+    cfg.update({
+        "slurm_job_id": get_slurm_job_id(), 
+        "slurm_array_task_id": get_slurm_task_id()
+    })
+    run_name = f"{config.task_name}-{config.seed}"
+    group = f"{config.domain}-{config.task_name}-{ts}"
+    wandb.init(
+            run_name=run_name, 
+            job_type="train", 
+            config=config,
+            tags=[config.task_name, config.domain],
+            save_code=False
+    )
+
 def print_results(results, config):
     print("-" * 40)
     print(f"Task: {config.task_name.upper()}")
@@ -328,8 +355,12 @@ def main():
     set_seed(config.seed)
 
     print("Configuration:")
-    pprint(config.__dict__)
+    pprint(asdict(config))
     print()
+        
+    if config.use_wandb:
+        setup_wandb(config)
+
     task, X, y, d_best = create_task(config)
 
     trainer = train_diffusion(config, X, y)
@@ -337,9 +368,17 @@ def main():
 
     res_x, res_y = sampling(task, config, ema_model, d_best)
     results = evaluation(task, config, res_y)
+    if config.use_wandb:
+        wandb.log(results)
 
     print()
     print_results(results, config)
+    
+    if config.save_dir is not None:
+        with (config.save_dir / "results.json").open('w') as ofstream:
+            # Ensure that the results do not contain e.g. numpy objects
+            payload = {key: float(val) for key, val in results.items()} 
+            json.dump(payload, ofstream)
 
 
 if __name__ == "__main__":
