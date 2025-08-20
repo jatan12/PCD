@@ -144,6 +144,7 @@ def train_diffusion(
     if config.reweight_loss:
         print("Using reweighted loss")
         weights = reweight_multi_objective(y_train, num_bins=20)
+        print(f" mu {weights.mean():.2f}, sd {np.std(weights):.2f}, ({weights.min():.2f}, {weights.max():.2f})")
         weights_tensor = torch.from_numpy(weights).float()
     else:        
         print("Using standard loss")
@@ -319,13 +320,16 @@ def evaluation(
 def setup_wandb(config):
     now = datetime.datetime.now()
     ts = now.strftime("%Y-%m-%dT%H-%M")
+    exclude_list = ("gin_config_files", "gin_params", "use_wandb", "save_dir",  "experiment_name")
 
-    cfg = asdict(config)
+    cfg = asdict(
+            config, 
+            dict_factory=lambda x: {k: v for (k, v) in x if k not in exclude_list}
+    )
 
-    # Remove some unneccessary keys from config
-    for key in ["gin_config_files", "gin_params", "use_wandb", "save_dir"]:
-        cfg.pop(key)
-    experiment_name = cfg.pop("experiment_name")
+
+
+    experiment_name = config.experiment_name
 
 
     cfg.update({

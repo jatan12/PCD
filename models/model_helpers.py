@@ -188,7 +188,7 @@ def reweight_multi_objective(
     k: float = 0.01,
     tau: float = 1000.0,
     maximize: bool = False,
-    normalize_dom_counts: bool = True,
+    normalize_dom_counts: bool = False,
 ) -> np.ndarray:
     """
     Compute sample weights for multi-objective optimization problems using
