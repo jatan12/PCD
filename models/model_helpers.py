@@ -114,10 +114,10 @@ def parse_args() -> TaskConfig:
             help='Enables logging to Weights and biases'
     )
     parser.add_argument(
-            '--experiment_group', 
+            '--experiment_name', 
             type=str, 
             default=None, 
-            help='The name of the experiment. Used only if "__use_wandb" is set'
+            help='The name of the experiment. Used only if "--use_wandb" is set'
     )
     parser.add_argument('--save_dir', type=pathlib.Path, default=None)
 
@@ -131,7 +131,7 @@ def parse_args() -> TaskConfig:
         data_pruning=args.data_pruning,
         data_preserved_ratio=args.data_preserved_ratio,
         use_wandb=args.use_wandb,
-        experiment_name=args.experiment_group,
+        experiment_name=args.experiment_name,
         save_dir=args.save_dir
     )
 
