@@ -333,7 +333,6 @@ def setup_wandb(config):
         "slurm_array_task_id": get_slurm_task_id()
     })
     run_name = f"{config.task_name}-{config.seed}"
-    group = f"{config.domain}-{config.task_name}-{ts}"
     wandb.init(
             run_name=run_name, 
             job_type="train", 
