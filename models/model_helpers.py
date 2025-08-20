@@ -32,6 +32,7 @@ class TaskConfig:
     gin_config_files: List[str] = field(default_factory=list)
     gin_params: List[str] = field(default_factory=list)
     use_wandb: bool = False
+    experiment_name: Optional[str] = None 
     save_dir: Optional[pathlib.Path] = None
 
 
@@ -112,7 +113,13 @@ def parse_args() -> TaskConfig:
             action='store_true',
             help='Enables logging to Weights and biases'
     )
-    parser.add_argument("--save_dir", type=pathlib.Path, default=None)
+    parser.add_argument(
+            '--experiment_group', 
+            type=str, 
+            default=None, 
+            help='The name of the experiment. Used only if "__use_wandb" is set'
+    )
+    parser.add_argument('--save_dir', type=pathlib.Path, default=None)
 
     args = parser.parse_args()
     ConfigClass = get_task_config(args.domain)
@@ -124,6 +131,7 @@ def parse_args() -> TaskConfig:
         data_pruning=args.data_pruning,
         data_preserved_ratio=args.data_preserved_ratio,
         use_wandb=args.use_wandb,
+        experiment_name=args.experiment_group,
         save_dir=args.save_dir
     )
 

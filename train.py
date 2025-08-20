@@ -322,6 +322,11 @@ def setup_wandb(config):
 
     cfg = asdict(config)
 
+    # Remove some unneccessary keys from config
+    for key in ["gin_config_files", "gin_params", "use_wandb", "save_dir"]:
+        cfg.pop(key)
+    experiment_name = cfg.pop("experiment_name")
+
 
     cfg.update({
         "slurm_job_id": get_slurm_job_id(), 
@@ -333,6 +338,7 @@ def setup_wandb(config):
             run_name=run_name, 
             job_type="train", 
             config=config,
+            group=experiment_name,
             tags=[config.task_name, config.domain],
             save_code=False
     )
