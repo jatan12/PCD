@@ -54,7 +54,7 @@ class MORLConfig(TaskConfig):
     normalize_xs: bool = True
     normalize_ys : bool = True
     gin_config_files: List[str] = field(default_factory=lambda:
-                                        ["./config/morl.gin"])
+                                        ["./config/morl_v2.gin"])
     gin_params: List[str] = field(default_factory=list)
 
 @dataclass
