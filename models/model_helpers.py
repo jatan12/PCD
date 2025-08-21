@@ -19,6 +19,7 @@ from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
 class TaskConfig:
     seed: int = 42
     task_name: str = ""
+    domain: str = ""
     reweight_loss: bool = False
     data_pruning: bool = False
     data_preserved_ratio: float = 0.2
@@ -39,16 +40,27 @@ class TaskConfig:
 @dataclass
 class SyntheticConfig(TaskConfig):
     task_name: str = "dtlz1"
+    domain: str = "synthetic"
     normalize_xs: bool = True
     normalize_ys: bool = True
     gin_config_files: List[str] = field(default_factory=lambda:
                                         ["./config/synthetic.gin"])
     gin_params: List[str] = field(default_factory=list)
 
+@dataclass
+class MORLConfig(TaskConfig):
+    task_name = "mo_hopper_v2"
+    domain: str = "morl"
+    normalize_xs: bool = True
+    normalize_ys : bool = True
+    gin_config_files: List[str] = field(default_factory=lambda:
+                                        ["./config/morl.gin"])
+    gin_params: List[str] = field(default_factory=list)
 
 @dataclass
 class ScientificConfig(TaskConfig):
     task_name: str = "rfp"
+    domain: str = "scientific"
     normalize_xs: bool = False
     normalize_ys: bool = True
     gin_config_files: List[str] = field(default_factory=lambda:
@@ -65,6 +77,7 @@ def get_task_config(domain: str):
     domain_to_config = {
         "synthetic": SyntheticConfig,
         "scientific": ScientificConfig,
+        "morl": MORLConfig,
     }
     if domain not in domain_to_config:
         raise ValueError(

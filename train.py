@@ -327,8 +327,6 @@ def setup_wandb(config):
             dict_factory=lambda x: {k: v for (k, v) in x if k not in exclude_list}
     )
 
-
-
     experiment_name = config.experiment_name
 
 
@@ -342,7 +340,7 @@ def setup_wandb(config):
             job_type="train", 
             config=config,
             group=experiment_name,
-            tags=[config.task_name],
+            tags=[config.task_name, config.domain],
             save_code=False
     )
 
