@@ -1,36 +1,38 @@
-from pprint import pprint
-from typing import Tuple, Dict
-
-from dataclasses import asdict
-import gin
-import json
 import datetime
-import torch
-import numpy as np
-from sklearn.model_selection import train_test_split
-import wandb
-import offline_moo.off_moo_bench as ob
-from offline_moo.utils import get_quantile_solutions
-from offline_moo.off_moo_bench.task_set import ALLTASKSDICT
-from offline_moo.off_moo_bench.evaluation.metrics import hv
+import json
+from dataclasses import asdict
+from pprint import pprint
+from typing import Dict, Tuple
 
-from models import elucidated_diffusion, diffusion_utils
+import gin
+import numpy as np
+import torch
+from sklearn.model_selection import train_test_split
+
+import offline_moo.off_moo_bench as ob
+import wandb
+from models import diffusion_utils, elucidated_diffusion
 from models.model_helpers import (
     TaskConfig,
+    get_slurm_job_id,
+    get_slurm_task_id,
     parse_args,
-    set_seed,
     reweight_multi_objective,
     sample_uniform_toward_ideal,
-    get_slurm_job_id,
-    get_slurm_task_id
+    set_seed,
 )
+from offline_moo.off_moo_bench.evaluation.metrics import hv
+from offline_moo.off_moo_bench.task_set import ALLTASKSDICT
+from offline_moo.utils import get_quantile_solutions
 
 
-def create_task(config: TaskConfig) -> Tuple[
-        object,
-        np.ndarray,
-        np.ndarray,
-        np.ndarray,
+def create_task(
+    config: TaskConfig,
+) -> Tuple[
+    object,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
 ]:
     """
     Create and prepare a task dataset based on the given configuration.
@@ -134,40 +136,35 @@ def train_diffusion(
     if X_val is not None:
         print(f"Validation data shape: {X_val.shape}, dtype: {X_val.dtype}")
 
-    gin.parse_config_files_and_bindings(
-        config.gin_config_files,
-        config.gin_params
-    )
-    
+    gin.parse_config_files_and_bindings(config.gin_config_files, config.gin_params)
+
     X_train_tensor = torch.from_numpy(X_train).float()
     y_train_tensor = torch.from_numpy(y_train).float()
     if config.reweight_loss:
         print("Using reweighted loss")
         weights = reweight_multi_objective(y_train, num_bins=20)
-        print(f" mu {weights.mean():.2f}, sd {np.std(weights):.2f}, ({weights.min():.2f}, {weights.max():.2f})")
+        print(
+            f" mu {weights.mean():.2f}, sd {np.std(weights):.2f}, ({weights.min():.2f}, {weights.max():.2f})"
+        )
         weights_tensor = torch.from_numpy(weights).float()
-    else:        
+    else:
         print("Using standard loss")
         weights_tensor = torch.ones(X_train_tensor.shape[0]).float()
 
     assert weights_tensor.shape[0] == X_train_tensor.shape[0], (
-            f"Mismatch of shapes for X and weights: {X_train_tensor.shape=} "
-            f"!= {weights_tensor.shape=}"
+        f"Mismatch of shapes for X and weights: {X_train_tensor.shape=} "
+        f"!= {weights_tensor.shape=}"
     )
 
     train_dataset = torch.utils.data.TensorDataset(
-        X_train_tensor,
-        y_train_tensor,
-        weights_tensor
+        X_train_tensor, y_train_tensor, weights_tensor
     )
     if X_val is not None and y_val is not None:
         X_val_tensor = torch.from_numpy(X_val).float()
         y_val_tensor = torch.from_numpy(y_val).float()
-        val_weights = torch.ones(y_val.shape[0]).float() 
+        val_weights = torch.ones(y_val.shape[0]).float()
         val_dataset = torch.utils.data.TensorDataset(
-            X_val_tensor,
-            y_val_tensor,
-            val_weights
+            X_val_tensor, y_val_tensor, val_weights
         )
     else:
         val_dataset = None
@@ -178,10 +175,7 @@ def train_diffusion(
     )
 
     trainer = elucidated_diffusion.Trainer(
-        diffusion,
-        train_dataset,
-        val_dataset,
-        use_wandb=config.use_wandb
+        diffusion, train_dataset, val_dataset, use_wandb=config.use_wandb
     )
 
     trainer.train()
@@ -190,11 +184,7 @@ def train_diffusion(
 
 
 def sampling(
-    task,
-    config,
-    diffusion,
-    d_best: np.ndarray,
-    guidance_scale: float = 1.0
+    task, config, diffusion, d_best: np.ndarray, guidance_scale: float = 1.0
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Generate samples from the
@@ -228,9 +218,7 @@ def sampling(
         )
 
     if cond_points_tensor.shape[0] != config.num_pareto_solutions:
-        batch_interleave = (
-            config.num_pareto_solutions // cond_points_tensor.shape[0]
-        )
+        batch_interleave = config.num_pareto_solutions // cond_points_tensor.shape[0]
         cond_points_tensor = cond_points_tensor.repeat_interleave(
             batch_interleave, dim=0
         )
@@ -293,11 +281,7 @@ def evaluation(
     nadir_point = task.nadir_point
     nadir_point = task.normalize_y(nadir_point, normalization_method="min-max")
 
-    _, d_best = task.get_N_non_dominated_solutions(
-         N=256,
-         return_x=False,
-         return_y=True
-    )
+    _, d_best = task.get_N_non_dominated_solutions(N=256, return_x=False, return_y=True)
     d_best = task.normalize_y(d_best, normalization_method="min-max")
 
     # Hypervolume (Normalized)
@@ -320,29 +304,44 @@ def evaluation(
 def setup_wandb(config):
     now = datetime.datetime.now()
     ts = now.strftime("%Y-%m-%dT%H-%M")
-    exclude_list = ("gin_config_files", "gin_params", "use_wandb", "save_dir",  "experiment_name")
+    exclude_list = (
+        "gin_config_files",
+        "gin_params",
+        "use_wandb",
+        "save_dir",
+        "experiment_name",
+    )
 
     cfg = asdict(
-            config, 
-            dict_factory=lambda x: {k: v for (k, v) in x if k not in exclude_list}
+        config, dict_factory=lambda x: {k: v for (k, v) in x if k not in exclude_list}
     )
 
     experiment_name = config.experiment_name
 
-
-    cfg.update({
-        "slurm_job_id": get_slurm_job_id(), 
-        "slurm_array_task_id": get_slurm_task_id()
-    })
+    cfg.update(
+        {
+            "slurm_job_id": get_slurm_job_id(),
+            "slurm_array_task_id": get_slurm_task_id(),
+            "reweight_num_bins": gin.query_parameter(
+                "reweight_multi_objective.num_bins"
+            ),
+            "reweight_k": gin.query_parameter("reweight_multi_objective.k"),
+            "reweight_tau": gin.query_parameter("reweight_multi_objective.tau"),
+            "reweight_normalize_dom_counts": gin.query_parameter(
+                "reweight_multi_objective.normalize_dom_counts"
+            ),
+        }
+    )
     run_name = f"{config.task_name}-{config.seed}"
     wandb.init(
-            name=run_name, 
-            job_type="train", 
-            config=config,
-            group=experiment_name,
-            tags=[config.task_name, config.domain],
-            save_code=False
+        name=run_name,
+        job_type="train",
+        config=config,
+        group=experiment_name,
+        tags=[config.task_name, config.domain],
+        save_code=False,
     )
+
 
 def print_results(results, config):
     print("-" * 40)
@@ -364,7 +363,7 @@ def main():
     print("Configuration:")
     pprint(asdict(config))
     print()
-        
+
     if config.use_wandb:
         setup_wandb(config)
 
@@ -380,11 +379,11 @@ def main():
 
     print()
     print_results(results, config)
-    
+
     if config.save_dir is not None:
-        with (config.save_dir / "results.json").open('w') as ofstream:
+        with (config.save_dir / "results.json").open("w") as ofstream:
             # Ensure that the results do not contain e.g. numpy objects
-            payload = {key: float(val) for key, val in results.items()} 
+            payload = {key: float(val) for key, val in results.items()}
             json.dump(payload, ofstream)
 
 

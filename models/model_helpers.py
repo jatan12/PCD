@@ -8,6 +8,7 @@ from typing import List, Tuple, Optional, Dict
 import numpy as np
 import scipy
 import torch
+import gin
 
 from pygmo import fast_non_dominated_sorting
 from pymoo.factory import get_reference_directions
@@ -195,13 +196,14 @@ def get_pareto_front(y):
     return y[front_indices], front_indices
 
 
+@gin.configurable(denylist=["scores", "maximize"])
 def reweight_multi_objective(
     scores: np.ndarray,
     num_bins: int = 20,
-    k: float = 0.01,
-    tau: float = 1000.0,
+    k: float = 10,
+    tau: float = 0.05,
     maximize: bool = False,
-    normalize_dom_counts: bool = False,
+    normalize_dom_counts: bool = True,
 ) -> np.ndarray:
     """
     Compute sample weights for multi-objective optimization problems using
