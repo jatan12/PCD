@@ -1,4 +1,5 @@
 # macOS system files
+de
 .DS_Store
 
 # Python cache
@@ -22,3 +23,6 @@ slurm_scripts/
 offline_moo/data/
 offline_moo/results/
 offline_moo/model/
+
+# Any test runs
+wandb/*
