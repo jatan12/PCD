@@ -136,7 +136,6 @@ def train_diffusion(
     if X_val is not None:
         print(f"Validation data shape: {X_val.shape}, dtype: {X_val.dtype}")
 
-    gin.parse_config_files_and_bindings(config.gin_config_files, config.gin_params)
 
     X_train_tensor = torch.from_numpy(X_train).float()
     y_train_tensor = torch.from_numpy(y_train).float()
@@ -363,6 +362,9 @@ def main():
     print("Configuration:")
     pprint(asdict(config))
     print()
+
+    # Setup configuration
+    gin.parse_config_files_and_bindings(config.gin_config_files, config.gin_params)
 
     if config.use_wandb:
         setup_wandb(config)
