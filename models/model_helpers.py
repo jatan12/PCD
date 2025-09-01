@@ -1,18 +1,17 @@
-import os
-import random
 import argparse
-from dataclasses import dataclass, field
+import os
 import pathlib
-from typing import List, Tuple, Optional, Dict
+import random
+from dataclasses import dataclass, field
+from typing import Dict, List, Literal, Optional, Tuple
 
+import gin
 import numpy as np
 import scipy
 import torch
-import gin
-
 from pygmo import fast_non_dominated_sorting
-from pymoo.factory import get_reference_directions
 from pymoo.algorithms.moo.nsga2 import calc_crowding_distance
+from pymoo.factory import get_reference_directions
 from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
 
 
@@ -21,6 +20,7 @@ class TaskConfig:
     seed: int = 42
     task_name: str = ""
     domain: str = ""
+    sampling_method: Literal["uniform-ideal", "uniform-angle"] = "uniform-ideal"
     reweight_loss: bool = False
     data_pruning: bool = False
     data_preserved_ratio: float = 0.2
@@ -34,7 +34,7 @@ class TaskConfig:
     gin_config_files: List[str] = field(default_factory=list)
     gin_params: List[str] = field(default_factory=list)
     use_wandb: bool = False
-    experiment_name: Optional[str] = None 
+    experiment_name: Optional[str] = None
     save_dir: Optional[pathlib.Path] = None
 
 
@@ -44,19 +44,23 @@ class SyntheticConfig(TaskConfig):
     domain: str = "synthetic"
     normalize_xs: bool = True
     normalize_ys: bool = True
-    gin_config_files: List[str] = field(default_factory=lambda:
-                                        ["./config/synthetic.gin"])
+    gin_config_files: List[str] = field(
+        default_factory=lambda: ["./config/synthetic.gin"]
+    )
     gin_params: List[str] = field(default_factory=list)
+
 
 @dataclass
 class MORLConfig(TaskConfig):
     task_name = "mo_hopper_v2"
     domain: str = "morl"
     normalize_xs: bool = True
-    normalize_ys : bool = True
-    gin_config_files: List[str] = field(default_factory=lambda:
-                                        ["./config/morl_v2.gin"])
+    normalize_ys: bool = True
+    gin_config_files: List[str] = field(
+        default_factory=lambda: ["./config/morl_v2.gin"]
+    )
     gin_params: List[str] = field(default_factory=list)
+
 
 @dataclass
 class ScientificConfig(TaskConfig):
@@ -64,8 +68,9 @@ class ScientificConfig(TaskConfig):
     domain: str = "scientific"
     normalize_xs: bool = False
     normalize_ys: bool = True
-    gin_config_files: List[str] = field(default_factory=lambda:
-                                        ["./config/scientific.gin"])
+    gin_config_files: List[str] = field(
+        default_factory=lambda: ["./config/scientific.gin"]
+    )
     gin_params: List[str] = field(default_factory=list)
 
     def __post_init__(self):
@@ -91,49 +96,50 @@ def get_task_config(domain: str):
 def parse_args() -> TaskConfig:
     parser = argparse.ArgumentParser(description="Diffusion Model Configs")
 
-    parser.add_argument('--seed', type=int, default=1000,
-                        help="Random seed (default: %(default)s)")
-    parser.add_argument('--task_name', type=str, default="dtlz1",
-                        help="Subtask name (e.g., dtlz1, rfp)")
     parser.add_argument(
-        '--domain',
+        "--seed", type=int, default=1000, help="Random seed (default: %(default)s)"
+    )
+    parser.add_argument(
+        "--task_name", type=str, default="dtlz1", help="Subtask name (e.g., dtlz1, rfp)"
+    )
+    parser.add_argument(
+        "--domain",
         type=str,
         required=True,
         choices=["synthetic", "scientific", "morl", "re"],
-        help="Task domain (eg. synthetic, scientific)"
+        help="Task domain (eg. synthetic, scientific)",
     )
     parser.add_argument(
-            '--reweight-loss',
-            action='store_true',
-            help='Enable loss reweighting based on dominance number'
+        "--reweight-loss",
+        action="store_true",
+        help="Enable loss reweighting based on dominance number",
     )
     parser.add_argument(
-            '--data_pruning', 
-            action='store_true',
-            help="Enable pruning of dominated data"
+        "--data_pruning", action="store_true", help="Enable pruning of dominated data"
     )
     parser.add_argument(
-        '--data_preserved_ratio',
+        "--data_preserved_ratio",
         type=float,
         default=0.2,
-        help=(
-            "Fraction of data to preserve when pruning "
-            "(default: %(default)s)"
-        )
+        help=("Fraction of data to preserve when pruning (default: %(default)s)"),
+    )
+    parser.add_argument(
+        "--sampling-method",
+        type=str,
+        choices=["uniform-ideal", "uniform-direction"],
+        default="uniform-ideal",
     )
 
     parser.add_argument(
-            '--use_wandb',
-            action='store_true',
-            help='Enables logging to Weights and biases'
+        "--use_wandb", action="store_true", help="Enables logging to Weights and biases"
     )
     parser.add_argument(
-            '--experiment_name', 
-            type=str, 
-            default=None, 
-            help='The name of the experiment. Used only if "--use_wandb" is set'
+        "--experiment_name",
+        type=str,
+        default=None,
+        help='The name of the experiment. Used only if "--use_wandb" is set',
     )
-    parser.add_argument('--save_dir', type=pathlib.Path, default=None)
+    parser.add_argument("--save_dir", type=pathlib.Path, default=None)
 
     args = parser.parse_args()
     ConfigClass = get_task_config(args.domain)
@@ -141,19 +147,20 @@ def parse_args() -> TaskConfig:
     config = ConfigClass(
         seed=args.seed,
         task_name=args.task_name,
+        sampling_method=args.sampling_method,
         reweight_loss=args.reweight_loss,
         data_pruning=args.data_pruning,
         data_preserved_ratio=args.data_preserved_ratio,
         use_wandb=args.use_wandb,
         experiment_name=args.experiment_name,
-        save_dir=args.save_dir
+        save_dir=args.save_dir,
     )
 
     return config
 
 
 def get_slurm_job_id():
-    """ Retrieve job-id from slurm if applicable  """
+    """Retrieve job-id from slurm if applicable"""
     job_id = os.environ.get("SLURM_ARRAY_JOB_ID", None)
     if job_id is None:
         job_id = os.environ.get("SLURM_JOB_ID", None)
@@ -161,9 +168,10 @@ def get_slurm_job_id():
 
 
 def get_slurm_task_id():
-    """ Retrieve task array id from slurm if applicable  """
+    """Retrieve task array id from slurm if applicable"""
     task_id = os.environ.get("SLURM_ARRAY_TASK_ID", None)
     return int(task_id) if task_id is not None else task_id
+
 
 def set_seed(seed: int) -> None:
     random.seed(seed)
@@ -232,9 +240,7 @@ def reweight_multi_objective(
     weights : np.ndarray
         A (N,) array of sample weights.
     """
-    assert scores.ndim == 2, (
-        f"Expected 2D array for scores, got shape {scores.shape}"
-    )
+    assert scores.ndim == 2, f"Expected 2D array for scores, got shape {scores.shape}"
     scores_proc = scores.copy()
 
     # Pygmo assumes minimization; invert if maximizing
@@ -257,12 +263,28 @@ def reweight_multi_objective(
     for i in range(unique_bins.shape[0]):
         mask = binnum == unique_bins[i]
         n_items = mask.sum()
-        weights[mask] = (
-            n_items / (n_items + k)
-            * np.exp(-dc[mask].mean() / tau)
-        )
+        weights[mask] = n_items / (n_items + k) * np.exp(-dc[mask].mean() / tau)
 
     return weights
+
+
+def sample_uniform_direction(
+    d_best: np.ndarray, k: int, alpha: float = 0.4, noise_scale: float = 0.05
+):
+    idx = np.random.choice(len(d_best), size=k, replace=True)
+    base = d_best[idx]
+
+    # TODO: Make the total  number of points configurable
+    # Tile the same points for easier math
+    num_tiles = 256 // k
+    base = np.tile(base, (num_tiles, 1))
+
+    # Sample projection angles from 0 to 180 deg
+    angles = np.random.uniform(size=base.shape[0]) * 0.5 * np.pi
+    # Extrapolation factor
+    x_i = base[:, 0] - np.sin(angles) * alpha
+    y_i = base[:, 1] - np.cos(angles) * alpha
+    return np.stack([x_i, y_i], axis=1)
 
 
 def sample_uniform_toward_ideal(
@@ -305,11 +327,7 @@ def sample_uniform_toward_ideal(
     directions = ideal_point - base  # minimization direction
     cond_points = base + alphas * directions
 
-    noise = np.random.normal(
-        loc=0.0,
-        scale=noise_scale,
-        size=cond_points.shape
-    )
+    noise = np.random.normal(loc=0.0, scale=noise_scale, size=cond_points.shape)
     noisy_points = cond_points + noise
 
     return np.clip(noisy_points, a_min=ideal_point, a_max=nadir_point)
@@ -321,7 +339,7 @@ def sample_along_reference_vectors(
     seed: int = 42,
     method: str = "energy",
     alpha_range: Tuple[float, float] = (0.1, 0.3),
-    bounds: Tuple[float, float] = (0., 1.),
+    bounds: Tuple[float, float] = (0.0, 1.0),
 ) -> np.ndarray:
     """
     Sample k points by moving inward from a normalized Pareto front
@@ -347,8 +365,7 @@ def sample_along_reference_vectors(
     # Compute crowding distances and sanitize them
     crowding_dist = calc_crowding_distance(d_best)
     finite_max = np.nanmax(crowding_dist[np.isfinite(crowding_dist)])
-    crowding_dist = np.where(np.isinf(crowding_dist),
-                             finite_max * 10, crowding_dist)
+    crowding_dist = np.where(np.isinf(crowding_dist), finite_max * 10, crowding_dist)
     crowding_dist = np.nan_to_num(crowding_dist, nan=0.0)
 
     # Normalize to get sampling probabilities or fallback to uniform

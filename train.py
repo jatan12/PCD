@@ -18,6 +18,7 @@ from models.model_helpers import (
     get_slurm_task_id,
     parse_args,
     reweight_multi_objective,
+    sample_uniform_direction,
     sample_uniform_toward_ideal,
     set_seed,
 )
@@ -136,7 +137,6 @@ def train_diffusion(
     if X_val is not None:
         print(f"Validation data shape: {X_val.shape}, dtype: {X_val.dtype}")
 
-
     X_train_tensor = torch.from_numpy(X_train).float()
     y_train_tensor = torch.from_numpy(y_train).float()
     if config.reweight_loss:
@@ -202,11 +202,18 @@ def sampling(
         ValueError:
             If num_pareto_solutions is not divisible by conditioning points.
     """
-    # Sample extrapolated conditioning points
-    cond_points = sample_uniform_toward_ideal(
-        d_best=d_best,
-        k=32,
-    )
+    assert config.sampling_method in ("uniform-ideal", "uniform-angle")
+
+    if config.sampling_method == "uniform-ideal":
+        # Sample extrapolated conditioning points
+        cond_points = sample_uniform_toward_ideal(
+            d_best=d_best,
+            k=32,
+        )
+    else:
+        # Sample extrapolated points, where samples are extrapolated in random
+        # directions
+        cond_points = sample_uniform_direction(d_best=d_best, k=32, alpha=0.4)
 
     cond_points_tensor = torch.from_numpy(cond_points).float()
 
