@@ -183,7 +183,7 @@ def train_diffusion(
 
 
 def sampling(
-    task, config, diffusion, d_best: np.ndarray, guidance_scale: float = 1.0
+    task, config, diffusion, d_best: np.ndarray, 
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Generate samples from the
@@ -232,7 +232,7 @@ def sampling(
     res_x = diffusion.sample(
         batch_size=cond_points_tensor.shape[0],
         cond=cond_points_tensor,
-        guidance_scale=guidance_scale,
+        guidance_scale=config.guidance_scale,
         clamp=False,
     )
 

@@ -21,6 +21,7 @@ class TaskConfig:
     task_name: str = ""
     domain: str = ""
     sampling_method: Literal["uniform-ideal", "uniform-angle"] = "uniform-ideal"
+    guidance_scale: float = 1.0
     reweight_loss: bool = False
     data_pruning: bool = False
     data_preserved_ratio: float = 0.2
@@ -129,6 +130,7 @@ def parse_args() -> TaskConfig:
         choices=["uniform-ideal", "uniform-direction"],
         default="uniform-ideal",
     )
+    parser.add_argument("--sampling-guidance-scale", type=float, default=1.0)
 
     parser.add_argument(
         "--use_wandb", action="store_true", help="Enables logging to Weights and biases"
@@ -148,6 +150,7 @@ def parse_args() -> TaskConfig:
         seed=args.seed,
         task_name=args.task_name,
         sampling_method=args.sampling_method,
+        guidance_scale=args.sampling_guidance_scale,
         reweight_loss=args.reweight_loss,
         data_pruning=args.data_pruning,
         data_preserved_ratio=args.data_preserved_ratio,
