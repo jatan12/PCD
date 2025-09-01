@@ -202,7 +202,7 @@ def sampling(
         ValueError:
             If num_pareto_solutions is not divisible by conditioning points.
     """
-    assert config.sampling_method in ("uniform-ideal", "uniform-angle")
+    assert config.sampling_method in ("uniform-ideal", "uniform-direction")
 
     if config.sampling_method == "uniform-ideal":
         # Sample extrapolated conditioning points
