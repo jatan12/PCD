@@ -50,6 +50,13 @@ class SyntheticConfig(TaskConfig):
     )
     gin_params: List[str] = field(default_factory=list)
 
+@dataclass
+class REConfig(TaskConfig):
+    task_name: str = "re21"
+    domain: str = "re"
+    normalize_xs: bool = True
+    normalize_ys: bool = True
+    gin_config_files: List[str] = field(default_factory=lambda: ["./config/re.gin"])
 
 @dataclass
 class MORLConfig(TaskConfig):
@@ -83,6 +90,7 @@ class ScientificConfig(TaskConfig):
 def get_task_config(domain: str):
     domain_to_config = {
         "synthetic": SyntheticConfig,
+        "re": REConfig,
         "scientific": ScientificConfig,
         "morl": MORLConfig,
     }
