@@ -141,7 +141,11 @@ def parse_args() -> TaskConfig:
         choices=["uniform-ideal", "uniform-direction"],
         default="uniform-ideal",
     )
-    parser.add_argument("--sampling-guidance-scale", type=float, default=1.0)
+    parser.add_argument(
+            "--sampling-guidance-scale", 
+            type=float, 
+            default=1.0
+    )
 
     parser.add_argument(
         "--use_wandb", action="store_true", help="Enables logging to Weights and biases"
@@ -158,13 +162,16 @@ def parse_args() -> TaskConfig:
     ConfigClass = get_task_config(args.domain)
 
     if args.save_dir is not None and args.experiment_name is not None:
-        save_dir = args.save_dir / args.experiment_name
+        save_dir = args.save_dir / args.experiment_name / args.seed
     elif args.save_dir is not None:
         now = datetime.datetime.now()
         ts = now.strftime("%Y-%m-%dT%H-%M")
-        save_dir = args.save_dir.with_name(f"{args.save_dir.name}_{ts}")
+        save_dir = args.save_dir.with_name(f"{args.save_dir.name}_{args.seed}_{ts}")
     else:
-        save_dir = args.save_dir
+        save_dir = args.save_dir # args.save_dir is none!
+
+    # Ensure that the directory exists
+    save_dir.mkdir(parents=True, exist_ok=True)
 
     config = ConfigClass(
         seed=args.seed,
