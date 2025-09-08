@@ -27,6 +27,32 @@ from offline_moo.off_moo_bench.task_set import ALLTASKSDICT
 from offline_moo.utils import get_quantile_solutions
 
 
+# Configure evobench
+try:
+    from evobenchx.database.init import config as econfig
+    off_moo_dir = (
+            pathlib.Path(__file__) 
+            / "offline_moo" 
+            / "off_moo_bench" 
+            / "problem" 
+            / "mo_nas"
+    ).resolve()
+
+    db_path = off_moo_dir  / "database"
+    data_path = off_moo_dir  / "data"
+    if not db_path.exists():
+        print(f"EvoBenchX: {str(db_path)!r} does not exist!")
+        raise
+
+    if not data_path.exists():
+        print(f"EvoBenchX: {str(data_path)!r} does not exist!")
+        raise
+
+except Exception as e:
+    print("Could  not configure EvoBenchX! Continuing without it!")
+
+
+
 def create_task(
     config: TaskConfig,
 ) -> Tuple[
@@ -183,7 +209,11 @@ def train_diffusion(
 
 
 def sampling(
-    task, config, diffusion, d_best: np.ndarray, 
+    task,
+    config,
+    diffusion,
+    guidance_scale: float,
+    d_best: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Generate samples from the
@@ -232,7 +262,7 @@ def sampling(
     res_x = diffusion.sample(
         batch_size=cond_points_tensor.shape[0],
         cond=cond_points_tensor,
-        guidance_scale=config.guidance_scale,
+        guidance_scale=guidance_scale,
         clamp=False,
     )
 
@@ -351,7 +381,10 @@ def setup_wandb(config):
 
 def print_results(results, config):
     print("-" * 40)
-    print(f"Task: {config.task_name.upper()}")
+    print(
+        f"Task: {config.task_name.upper()} | "
+        f"Guidance scale {results['guidance_scale']:.2f}"
+    )
     print(f"{'Metric':<25} {'Value':>10}")
     print("-" * 40)
     print(f"{'Hypervolume (D(best))':<25} {results['hv_d_best']:10.4f}")
@@ -381,8 +414,14 @@ def main():
     trainer = train_diffusion(config, X, y)
     ema_model = trainer.ema.ema_model
 
-    res_x, res_y = sampling(task, config, ema_model, d_best)
+    # Sample the model with different guidance scales
+    res_x, res_y = sampling(
+        task, config, ema_model, guidance_scale=config.guidance_scale, d_best=d_best
+    )
     results = evaluation(task, config, res_y)
+    results["guidance_scale"] = scale
+    results = {key: float(val) for key,  val in results.items()}
+
     if config.use_wandb:
         wandb.log(results)
 
@@ -392,8 +431,7 @@ def main():
     if config.save_dir is not None:
         with (config.save_dir / "results.json").open("w") as ofstream:
             # Ensure that the results do not contain e.g. numpy objects
-            payload = {key: float(val) for key, val in results.items()}
-            json.dump(payload, ofstream)
+            json.dump(all_results, ofstream)
 
 
 if __name__ == "__main__":
