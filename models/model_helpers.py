@@ -1,4 +1,5 @@
 import argparse
+import datetime
 import os
 import pathlib
 import random
@@ -50,6 +51,7 @@ class SyntheticConfig(TaskConfig):
     )
     gin_params: List[str] = field(default_factory=list)
 
+
 @dataclass
 class REConfig(TaskConfig):
     task_name: str = "re21"
@@ -57,6 +59,7 @@ class REConfig(TaskConfig):
     normalize_xs: bool = True
     normalize_ys: bool = True
     gin_config_files: List[str] = field(default_factory=lambda: ["./config/re.gin"])
+
 
 @dataclass
 class MORLConfig(TaskConfig):
@@ -154,6 +157,15 @@ def parse_args() -> TaskConfig:
     args = parser.parse_args()
     ConfigClass = get_task_config(args.domain)
 
+    if args.save_dir is not None and args.experiment_name is not None:
+        save_dir = args.save_dir / args.experiment_name
+    elif args.save_dir is not None:
+        now = datetime.datetime.now()
+        ts = now.strftime("%Y-%m-%dT%H-%M")
+        save_dir = args.save_dir.with_name(f"{args.save_dir.name}_{ts}")
+    else:
+        save_dir = args.save_dir
+
     config = ConfigClass(
         seed=args.seed,
         task_name=args.task_name,
@@ -164,7 +176,7 @@ def parse_args() -> TaskConfig:
         data_preserved_ratio=args.data_preserved_ratio,
         use_wandb=args.use_wandb,
         experiment_name=args.experiment_name,
-        save_dir=args.save_dir,
+        save_dir=save_dir,
     )
 
     return config

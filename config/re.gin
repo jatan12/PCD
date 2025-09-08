@@ -1,6 +1,6 @@
 # Default 
-construct_diffusion_model.normalize_type = 'identity'
-construct_diffusion_model.denoiser_network = @ResidualMLPDenoiser
+construct_diffusion_model.normalizer_type = 'identity'
+construct_diffusion_model.denoising_network = @ResidualMLPDenoiser
 construct_diffusion_model.disable_terminal_norm = False
 
 
