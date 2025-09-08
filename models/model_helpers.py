@@ -162,7 +162,7 @@ def parse_args() -> TaskConfig:
     ConfigClass = get_task_config(args.domain)
 
     if args.save_dir is not None and args.experiment_name is not None:
-        save_dir = args.save_dir / args.experiment_name / args.seed
+        save_dir = args.save_dir / args.experiment_name / str(args.seed)
     elif args.save_dir is not None:
         now = datetime.datetime.now()
         ts = now.strftime("%Y-%m-%dT%H-%M")
