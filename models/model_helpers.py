@@ -159,14 +159,23 @@ def parse_args() -> TaskConfig:
     args = parser.parse_args()
     ConfigClass = get_task_config(args.domain)
 
-    if args.save_dir is not None and args.experiment_name is not None:
-        save_dir = args.save_dir / args.experiment_name
-    elif args.save_dir is not None:
-        now = datetime.datetime.now()
-        ts = now.strftime("%Y-%m-%dT%H-%M")
-        save_dir = args.save_dir.with_name(f"{args.save_dir.name}_{ts}")
+
+    exp_name = (
+        "experiment"
+        if args.experiment_name is None
+        else args.experiment_name
+    )
+
+    if args.save_dir is not None:
+        save_dir = (
+            args.save_dir / args.domain / args.task_name / exp_name / str(args.seed)
+        )
     else:
-        save_dir = args.save_dir
+        save_dir = args.save_dir  # args.save_dir is none!
+
+    # Ensure that the directory exists
+    save_dir.mkdir(parents=True, exist_ok=True)
+
 
     config = ConfigClass(
         seed=args.seed,
