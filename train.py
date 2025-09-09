@@ -258,6 +258,8 @@ def sampling(
             batch_interleave, dim=0
         )
 
+    print(f"Sampling for {cond_points_tensor.shape[0]} solutions!, with {cond_points_tensor.shape=} and scale {guidance_scale:.2f}")
+
     res_x = diffusion.sample(
         batch_size=cond_points_tensor.shape[0],
         cond=cond_points_tensor,
