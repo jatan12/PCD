@@ -189,6 +189,7 @@ def parse_args() -> TaskConfig:
     # Ensure that the directory exists
     save_dir.mkdir(parents=True, exist_ok=True)
 
+
     config = ConfigClass(
         seed=args.seed,
         task_name=args.task_name,
