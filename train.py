@@ -524,7 +524,10 @@ def plot_results(d_best, cond_points, res_y, config, save_dir):
 
 def print_results(results, config):
     print("-" * 40)
-    print(f"Task: {config.task_name.upper()}")
+    print(
+            f"Task: {config.task_name.upper()} | "
+            f"Guidance scale {results['guidance_scale']:.2f}"
+    )
     print(f"{'Metric':<25} {'Value':>10}")
     print("-" * 40)
     print(f"{'Hypervolume (D(best))':<25} {results['hv_d_best']:10.4f}")
@@ -554,19 +557,23 @@ def main():
     trainer = train_diffusion(config, X, y)
     ema_model = trainer.ema.ema_model
 
-    # Sample the model with different guidance scales
-    res_x, res_y, cond_points = sampling(
-        task, config, ema_model, guidance_scale=config.guidance_scale, d_best=d_best
-    )
-    results = evaluation(task, config, res_y)
-    # results["guidance_scale"] = scale
-    results = {key: float(val) for key, val in results.items()}
+    all_results = []
+    for scale in config.guidance_scale:
+        res_x, res_y = sampling(
+                task, config, ema_model, d_best, guidance_scale=scale
+        )
+        results = evaluation(task, config, res_y)
 
-    if config.use_wandb:
-        wandb.log(results)
+        results["guidance_scale"] = scale
+        # Ensure that no e.g. numpy results are in the data
+        results = {key: float(val) for key, val in results.items()} 
+        print()
+        print_results(results, config)
+        all_results.append(results)
 
-    print()
-    print_results(results, config)
+        if config.use_wandb:
+            wandb.log(results)
+
 
     if config.save_dir is not None:
         # Save the configuration
@@ -630,7 +637,7 @@ def main():
 
         with (config.save_dir / "results.json").open("w") as ofstream:
             # Ensure that the results do not contain e.g. numpy objects
-            json.dump(results, ofstream)
+            json.dump(all_results, ofstream)
 
 
 if __name__ == "__main__":
