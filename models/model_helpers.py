@@ -63,13 +63,23 @@ class REConfig(TaskConfig):
 
 @dataclass
 class MORLConfig(TaskConfig):
-    task_name = "mo_hopper_v2"
+    task_name: str = "mo_hopper_v2"
     domain: str = "morl"
     normalize_xs: bool = True
     normalize_ys: bool = True
     gin_config_files: List[str] = field(
         default_factory=lambda: ["./config/morl_v2.gin"]
     )
+    gin_params: List[str] = field(default_factory=list)
+
+
+@dataclass
+class MONASConfig(TaskConfig):
+    task_name: str = "c10mop1"
+    domain: str = "monas"
+    normalize_xs: bool = True
+    normalize_ys: bool = True
+    gin_config_files: List[str] = field(default_factory=lambda: ["./config/monas.gin"])
     gin_params: List[str] = field(default_factory=list)
 
 
@@ -96,6 +106,7 @@ def get_task_config(domain: str):
         "re": REConfig,
         "scientific": ScientificConfig,
         "morl": MORLConfig,
+        "monas": MONASConfig
     }
     if domain not in domain_to_config:
         raise ValueError(
@@ -118,7 +129,7 @@ def parse_args() -> TaskConfig:
         "--domain",
         type=str,
         required=True,
-        choices=["synthetic", "scientific", "morl", "re"],
+        choices=["synthetic", "scientific", "morl", "monas", "re"],
         help="Task domain (eg. synthetic, scientific)",
     )
     parser.add_argument(
