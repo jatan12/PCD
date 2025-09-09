@@ -65,7 +65,7 @@ class REConfig(TaskConfig):
 class MORLConfig(TaskConfig):
     task_name: str = "mo_hopper_v2"
     domain: str = "morl"
-    normalize_xs: bool = True
+    normalize_xs: bool = False 
     normalize_ys: bool = True
     gin_config_files: List[str] = field(
         default_factory=lambda: ["./config/morl_v2.gin"]
