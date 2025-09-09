@@ -416,7 +416,7 @@ def main():
         task, config, ema_model, guidance_scale=config.guidance_scale, d_best=d_best
     )
     results = evaluation(task, config, res_y)
-    results["guidance_scale"] = scale
+    #results["guidance_scale"] = scale
     results = {key: float(val) for key, val in results.items()}
 
     if config.use_wandb:
@@ -428,7 +428,7 @@ def main():
     if config.save_dir is not None:
         with (config.save_dir / "results.json").open("w") as ofstream:
             # Ensure that the results do not contain e.g. numpy objects
-            json.dump(all_results, ofstream)
+            json.dump(results, ofstream)
 
 
 if __name__ == "__main__":

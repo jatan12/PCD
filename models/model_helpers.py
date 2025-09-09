@@ -65,7 +65,7 @@ class REConfig(TaskConfig):
 class MORLConfig(TaskConfig):
     task_name: str = "mo_hopper_v2"
     domain: str = "morl"
-    normalize_xs: bool = False 
+    normalize_xs: bool = False
     normalize_ys: bool = True
     gin_config_files: List[str] = field(
         default_factory=lambda: ["./config/morl_v2.gin"]
@@ -106,7 +106,7 @@ def get_task_config(domain: str):
         "re": REConfig,
         "scientific": ScientificConfig,
         "morl": MORLConfig,
-        "monas": MONASConfig
+        "monas": MONASConfig,
     }
     if domain not in domain_to_config:
         raise ValueError(
@@ -152,11 +152,7 @@ def parse_args() -> TaskConfig:
         choices=["uniform-ideal", "uniform-direction"],
         default="uniform-ideal",
     )
-    parser.add_argument(
-            "--sampling-guidance-scale", 
-            type=float, 
-            default=1.0
-    )
+    parser.add_argument("--sampling-guidance-scale", type=float, default=1.0)
 
     parser.add_argument(
         "--use_wandb", action="store_true", help="Enables logging to Weights and biases"
@@ -171,17 +167,23 @@ def parse_args() -> TaskConfig:
 
     args = parser.parse_args()
     ConfigClass = get_task_config(args.domain)
-    
+
     # Create the save directory
 
-    now = datetime.datetime.now()
-    ts = now.strftime("%Y-%m-%dT%H-%M")
-    exp_name = f"experiment_{ts}" if args.experiment_name is None else f"{args.experiment_name}_{ts}"
+    #now = datetime.datetime.now()
+    #ts = now.strftime("%Y-%m-%dT%H-%M")
+    exp_name = (
+        "experiment"
+        if args.experiment_name is None
+        else args.experiment_name
+    )
 
     if args.save_dir is not None:
-        save_dir = args.save_dir /args.domain / exp_name / str(args.seed)
+        save_dir = (
+            args.save_dir / args.domain / args.task_name / exp_name / str(args.seed)
+        )
     else:
-        save_dir = args.save_dir # args.save_dir is none!
+        save_dir = args.save_dir  # args.save_dir is none!
 
     # Ensure that the directory exists
     save_dir.mkdir(parents=True, exist_ok=True)
