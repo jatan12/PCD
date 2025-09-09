@@ -114,10 +114,12 @@ def create_task(
     )
 
     if config.normalize_xs:
+        print("Normalizing x values!")
         task.map_normalize_x()
         X = task.normalize_x(X, config.normalize_method_xs)
 
     if config.normalize_ys:
+        print("Normalizing y values!")
         task.map_normalize_y()
         y = task.normalize_y(y, config.normalize_method_ys)
         d_best = task.normalize_y(d_best, config.normalize_method_ys)

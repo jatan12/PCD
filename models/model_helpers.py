@@ -77,7 +77,7 @@ class MORLConfig(TaskConfig):
 class MONASConfig(TaskConfig):
     task_name: str = "c10mop1"
     domain: str = "monas"
-    normalize_xs: bool = True
+    normalize_xs: bool = False
     normalize_ys: bool = True
     gin_config_files: List[str] = field(default_factory=lambda: ["./config/monas.gin"])
     gin_params: List[str] = field(default_factory=list)
