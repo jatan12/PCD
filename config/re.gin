@@ -34,3 +34,7 @@ Trainer.save_and_sample_every = 500
 
 
 # Reweighing
+reweight_multi_objective.num_bins = 30
+reweight_multi_objective.k = 10
+reweight_multi_objective.tau = 0.05
+reweight_multi_objective.normalize_dom_counts = True
