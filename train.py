@@ -381,8 +381,7 @@ def setup_wandb(config):
 def print_results(results, config):
     print("-" * 40)
     print(
-        f"Task: {config.task_name.upper()} | "
-        f"Guidance scale {results['guidance_scale']:.2f}"
+        f"Task: {config.task_name.upper()}"
     )
     print(f"{'Metric':<25} {'Value':>10}")
     print("-" * 40)
