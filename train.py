@@ -1,5 +1,6 @@
 import datetime
 import json
+import pathlib
 from dataclasses import asdict
 from pprint import pprint
 from typing import Dict, Tuple
@@ -26,20 +27,16 @@ from offline_moo.off_moo_bench.evaluation.metrics import hv
 from offline_moo.off_moo_bench.task_set import ALLTASKSDICT
 from offline_moo.utils import get_quantile_solutions
 
-
 # Configure evobench
 try:
     from evobenchx.database.init import config as econfig
+
     off_moo_dir = (
-            pathlib.Path(__file__) 
-            / "offline_moo" 
-            / "off_moo_bench" 
-            / "problem" 
-            / "mo_nas"
+        pathlib.Path(__file__) / "offline_moo" / "off_moo_bench" / "problem" / "mo_nas"
     ).resolve()
 
-    db_path = off_moo_dir  / "database"
-    data_path = off_moo_dir  / "data"
+    db_path = off_moo_dir / "database"
+    data_path = off_moo_dir / "data"
     if not db_path.exists():
         print(f"EvoBenchX: {str(db_path)!r} does not exist!")
         raise
@@ -47,10 +44,10 @@ try:
     if not data_path.exists():
         print(f"EvoBenchX: {str(data_path)!r} does not exist!")
         raise
+    #  econfig(str(db_path), str(data_path))
 
-except Exception as e:
+except Exception:
     print("Could  not configure EvoBenchX! Continuing without it!")
-
 
 
 def create_task(
@@ -420,7 +417,7 @@ def main():
     )
     results = evaluation(task, config, res_y)
     results["guidance_scale"] = scale
-    results = {key: float(val) for key,  val in results.items()}
+    results = {key: float(val) for key, val in results.items()}
 
     if config.use_wandb:
         wandb.log(results)
