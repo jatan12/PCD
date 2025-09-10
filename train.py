@@ -229,6 +229,10 @@ def sampling(
             batch_interleave, dim=0
         )
 
+    print(
+        f"Sampling for {cond_points_tensor.shape[0]} solutions! "
+        f"with {cond_points_tensor.shape=} and scale {guidance_scale:.2f}"
+    )
     res_x = diffusion.sample(
         batch_size=cond_points_tensor.shape[0],
         cond=cond_points_tensor,
@@ -245,8 +249,17 @@ def sampling(
     if task.is_sequence:
         res_x = task.to_integers(res_x)
 
-    res_y = task.predict(res_x)
-
+    res_y = []
+    total_failed = 0
+    for i in range(config.num_pareto_solutions):
+        try:
+            y_i = task.predict(res_x[i, :])
+            res_y.append(y_i)
+        except Exception:
+            print(f"Failed to convert solution {i}")
+            total_failed += 1
+    print(f"In total {total_failed} / {config.num_pareto_solutions} solutions failed")
+    res_y = np.asarray(res_y)
     return res_x, res_y
 
 
@@ -354,6 +367,9 @@ def print_results(results, config):
     print(
             f"Task: {config.task_name.upper()} | "
             f"Guidance scale {results['guidance_scale']:.2f}"
+    )
+    print(
+        f"Task: {config.task_name.upper()}"
     )
     print(f"{'Metric':<25} {'Value':>10}")
     print("-" * 40)
