@@ -258,7 +258,10 @@ def sampling(
             batch_interleave, dim=0
         )
 
-    print(f"Sampling for {cond_points_tensor.shape[0]} solutions!, with {cond_points_tensor.shape=} and scale {guidance_scale:.2f}")
+    print(
+        f"Sampling for {cond_points_tensor.shape[0]} solutions! "
+        f"with {cond_points_tensor.shape=} and scale {guidance_scale:.2f}"
+    )
 
     res_x = diffusion.sample(
         batch_size=cond_points_tensor.shape[0],
@@ -276,8 +279,17 @@ def sampling(
     if task.is_sequence:
         res_x = task.to_integers(res_x)
 
-    res_y = task.predict(res_x)
-
+    res_y = []
+    total_failed = 0
+    for i in range(config.num_pareto_solutions):
+        try:
+            y_i = task.predict(res_x[i, :])
+            res_y.append(y_i)
+        except Exception:
+            print(f"Failed to convert solution {i}")
+            total_failed += 1
+    print(f"In total {total_failed} / {config.num_pareto_solutions} solutions failed")
+    res_y = np.asarray(res_y)
     return res_x, res_y
 
 
@@ -382,9 +394,7 @@ def setup_wandb(config):
 
 def print_results(results, config):
     print("-" * 40)
-    print(
-        f"Task: {config.task_name.upper()}"
-    )
+    print(f"Task: {config.task_name.upper()}")
     print(f"{'Metric':<25} {'Value':>10}")
     print("-" * 40)
     print(f"{'Hypervolume (D(best))':<25} {results['hv_d_best']:10.4f}")
@@ -419,7 +429,7 @@ def main():
         task, config, ema_model, guidance_scale=config.guidance_scale, d_best=d_best
     )
     results = evaluation(task, config, res_y)
-    #results["guidance_scale"] = scale
+    # results["guidance_scale"] = scale
     results = {key: float(val) for key, val in results.items()}
 
     if config.use_wandb:
