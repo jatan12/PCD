@@ -278,18 +278,27 @@ def sampling(
 
     if task.is_sequence:
         res_x = task.to_integers(res_x)
+    
+    # Fix issue where some MONAS benchmarks will fail the conversion, so 
+    # run the results one by one
+    if config.domain == "monas":
+        res_y = []
+        total_failed = 0
+        for i in range(config.num_pareto_solutions):
+            try:
+                y_i = task.predict(res_x[i, :])
+                res_y.append(y_i)
+            except Exception:
+                print(f"Failed to convert solution {i}")
+                total_failed += 1
+        print(
+                f"In total {total_failed} / {config.num_pareto_solutions} "
+                "solutions failed"
+        )
+        res_y = np.asarray(res_y)
+    else:
+        res_y = task.predict(res_x)
 
-    res_y = []
-    total_failed = 0
-    for i in range(config.num_pareto_solutions):
-        try:
-            y_i = task.predict(res_x[i, :])
-            res_y.append(y_i)
-        except Exception:
-            print(f"Failed to convert solution {i}")
-            total_failed += 1
-    print(f"In total {total_failed} / {config.num_pareto_solutions} solutions failed")
-    res_y = np.asarray(res_y)
     return res_x, res_y
 
 
