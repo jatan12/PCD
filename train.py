@@ -528,6 +528,9 @@ def print_results(results, config):
             f"Task: {config.task_name.upper()} | "
             f"Guidance scale {results['guidance_scale']:.2f}"
     )
+    print(
+        f"Task: {config.task_name.upper()}"
+    )
     print(f"{'Metric':<25} {'Value':>10}")
     print("-" * 40)
     print(f"{'Hypervolume (D(best))':<25} {results['hv_d_best']:10.4f}")
