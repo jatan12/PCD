@@ -169,9 +169,6 @@ def parse_args() -> TaskConfig:
     ConfigClass = get_task_config(args.domain)
 
     # Create the save directory
-
-    #now = datetime.datetime.now()
-    #ts = now.strftime("%Y-%m-%dT%H-%M")
     exp_name = (
         "experiment"
         if args.experiment_name is None

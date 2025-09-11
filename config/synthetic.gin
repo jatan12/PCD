@@ -32,7 +32,7 @@ Trainer.val_batch_size = 128
 Trainer.train_lr = 3e-4
 Trainer.lr_scheduler = 'cosine'
 Trainer.weight_decay = 0
-Trainer.train_num_steps = 200
+Trainer.train_num_steps = 1000
 Trainer.save_and_sample_every = 50
 
 # Reweighting
