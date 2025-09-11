@@ -185,7 +185,8 @@ def parse_args() -> TaskConfig:
 
     # Ensure that the directory exists
     save_dir.mkdir(parents=True, exist_ok=True)
-
+    
+    
     config = ConfigClass(
         seed=args.seed,
         task_name=args.task_name,
@@ -196,6 +197,7 @@ def parse_args() -> TaskConfig:
         data_preserved_ratio=args.data_preserved_ratio,
         use_wandb=args.use_wandb,
         experiment_name=args.experiment_name,
+        gin_params=args.gin_params,
         save_dir=save_dir,
     )
 
