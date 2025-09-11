@@ -164,6 +164,7 @@ def parse_args() -> TaskConfig:
         help='The name of the experiment. Used only if "--use_wandb" is set',
     )
     parser.add_argument("--save_dir", type=pathlib.Path, default=None)
+    parser.add_argument("--gin_params", nargs="*", default=[])
 
     args = parser.parse_args()
     ConfigClass = get_task_config(args.domain)
