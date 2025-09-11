@@ -417,6 +417,11 @@ def setup_wandb(config):
 
 def plot_results(d_best, cond_points, res_y, config, save_dir):
     print(f"D-best: {d_best.shape}")
+
+    y_color = COLORS["purple"]
+    d_best_color = COLORS["blue"]
+    cond_point_color = COLORS["orange"]
+
     if d_best.shape[1] == 3:
         fig = plt.figure(figsize=(10, 8))
         ax = fig.add_subplot(111, projection="3d")
@@ -425,14 +430,14 @@ def plot_results(d_best, cond_points, res_y, config, save_dir):
             d_best[:, 0],
             d_best[:, 1],
             d_best[:, 2],
-            color=COLORS["blue"],
+            color=d_best_color,
             label="d-best",
         )
         ax.scatter(
             cond_points[:, 0],
             cond_points[:, 1],
             cond_points[:, 2],
-            color=COLORS["orange"],
+            color=cond_point_color,
             label="cond-points",
         )
 
@@ -440,7 +445,7 @@ def plot_results(d_best, cond_points, res_y, config, save_dir):
             res_y[:, 0],
             res_y[:, 1],
             res_y[:, 2],
-            color=COLORS["purple"],
+            color=y_color,
             label="y",
         )
         ax.legend(fontsize="large")
@@ -451,20 +456,20 @@ def plot_results(d_best, cond_points, res_y, config, save_dir):
         ax.scatter(
             d_best[:, 0],
             d_best[:, 1],
-            color=COLORS["blue"],
+            color=d_best_color,
             label="d-best",
         )
         ax.scatter(
             cond_points[:, 0],
             cond_points[:, 1],
-            color=COLORS["orange"],
+            color=cond_point_color,
             label="cond-points",
         )
 
         ax.scatter(
             res_y[:, 0],
             res_y[:, 1],
-            color=COLORS["purple"],
+            color=y_color,
             label="y",
         )
         ax.legend(fontsize="large")
@@ -472,7 +477,35 @@ def plot_results(d_best, cond_points, res_y, config, save_dir):
         ax.set_title(config.task_name, fontsize="x-large")
 
     else:
-        assert False, f"{d_best.shape=}"
+        fig, axs = plt.subplots(
+            d_best.shape[1], d_best.shape[1], figsize=(20, 20), constrained_layout=True
+        )
+        fig.suptitle(config.task_name)
+
+        for i in range(d_best.shape[1]):
+            for j in range(d_best.shape[1]):
+                if i == j:
+                    continue
+                axs[i, j].scatter(
+                    d_best[:, i], d_best[:, j], color=d_best_color, label="d_best"
+                )
+                axs[i, j].scatter(
+                    cond_points[:, i],
+                    cond_points[:, j],
+                    color=cond_point_color,
+                    label="cond-points",
+                )
+                axs[i, j].scatter(
+                    res_y[:, i],
+                    res_y[:, j],
+                    color=y_color,
+                    label="y",
+                )
+                axs[i, j].grid(True, alpha=0.25)
+                axs[i, j].set_title(f"Obj {i + 1} vs {j + 1}")
+                axs[i, j].legend(fontsize="large")
+        fig.subplots_adjust(wspace=0.4, hspace=0.4)
+
     fig.savefig(save_dir / "pareto_front.png", dpi=400, bbox_inches="tight")
     fig.savefig(save_dir / "pareto_front.svg", tranparent=True, bbox_inches="tight")
 
@@ -527,7 +560,7 @@ def main():
         res_y = np.asarray(res_y)
         res_x = np.asarray(res_x)
         cond_points = np.asarray(cond_points)
-    
+
         if config.normalize_method_ys:
             plot_y = task.normalize_y(res_y)
         else:
