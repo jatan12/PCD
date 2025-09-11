@@ -507,7 +507,7 @@ def plot_results(d_best, cond_points, res_y, config, save_dir):
         fig.subplots_adjust(wspace=0.4, hspace=0.4)
 
     fig.savefig(save_dir / "pareto_front.png", dpi=400, bbox_inches="tight")
-    fig.savefig(save_dir / "pareto_front.svg", tranparent=True, bbox_inches="tight")
+    fig.savefig(save_dir / "pareto_front.svg", transparent=True, bbox_inches="tight")
 
 
 def print_results(results, config):
