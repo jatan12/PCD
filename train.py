@@ -1,4 +1,3 @@
-import datetime
 import json
 import pathlib
 from dataclasses import asdict
@@ -6,7 +5,9 @@ from pprint import pprint
 from typing import Dict, Tuple
 
 import gin
+import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
 import torch
 from sklearn.model_selection import train_test_split
 
@@ -48,6 +49,20 @@ try:
 
 except Exception:
     print("Could  not configure EvoBenchX! Continuing without it!")
+
+palette = sns.color_palette("colorblind")
+COLORS = {
+    "blue": palette[0],
+    "light-orange": palette[1],
+    "green": palette[2],
+    "orange": palette[3],
+    "purple": palette[4],
+    "brown": palette[5],
+    "pink": palette[6],
+    "grey": palette[7],
+    "yellow": palette[8],
+    "light-blue": palette[9],
+}
 
 
 def create_task(
@@ -278,8 +293,8 @@ def sampling(
 
     if task.is_sequence:
         res_x = task.to_integers(res_x)
-    
-    # Fix issue where some MONAS benchmarks will fail the conversion, so 
+
+    # Fix issue where some MONAS benchmarks will fail the conversion, so
     # run the results one by one
     if config.domain == "monas":
         res_y = []
@@ -292,14 +307,13 @@ def sampling(
                 print(f"Failed to convert solution {i}")
                 total_failed += 1
         print(
-                f"In total {total_failed} / {config.num_pareto_solutions} "
-                "solutions failed"
+            f"In total {total_failed} / {config.num_pareto_solutions} solutions failed"
         )
         res_y = np.asarray(res_y)
     else:
         res_y = task.predict(res_x)
 
-    return res_x, res_y
+    return res_x, res_y, cond_points
 
 
 def evaluation(
@@ -360,8 +374,8 @@ def evaluation(
 
 
 def setup_wandb(config):
-    now = datetime.datetime.now()
-    ts = now.strftime("%Y-%m-%dT%H-%M")
+    # now = datetime.datetime.now()
+    # ts = now.strftime("%Y-%m-%dT%H-%M")
     exclude_list = (
         "gin_config_files",
         "gin_params",
@@ -401,6 +415,67 @@ def setup_wandb(config):
     )
 
 
+def plot_results(d_best, cond_points, res_y, config, save_dir):
+    if d_best.shape[1] == 3:
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplotse(111, projection="3d")
+
+        ax.scatter(
+            d_best[:, 0],
+            d_best[:, 1],
+            d_best[:, 2],
+            color=COLORS["blue"],
+            label="d-best",
+        )
+        ax.scatter(
+            cond_points[:, 0],
+            cond_points[:, 1],
+            cond_points[:, 2],
+            color=COLORS["light-orange"],
+            label="cond-points",
+        )
+
+        ax.scatter(
+            res_y[:, 0],
+            res_y[:, 1],
+            res_y[:, 2],
+            color=COLORS["green"],
+            label="y",
+        )
+        ax.legend(fontsize="large")
+        ax.grid(True, alpha=0.25)
+        ax.set_title(config.task_name, fontsize="x-large")
+    elif d_best.shape[1] == 2:
+        fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+        ax.scatter(
+            d_best[:, 0],
+            d_best[:, 1],
+            color=COLORS["blue"],
+            label="d-best",
+        )
+        ax.scatter(
+            cond_points[:, 0],
+            cond_points[:, 1],
+            color=COLORS["light-orange"],
+            label="cond-points",
+        )
+
+        ax.scatter(
+            res_y[:, 0],
+            res_y[:, 1],
+            color=COLORS["green"],
+            label="y",
+        )
+        ax.legend(fontsize="large")
+        ax.grid(True, alpha=0.25)
+        ax.set_title(config.task_name, fontsize="x-large")
+
+    else:
+        assert False, f"{d_best.shape=}"
+    fig.savefig(save_dir / "pareto_front.png", dpi=400, bbox_inches="tight")
+    fig.savefig(save_dir / "pareto_front.svg", tranparent=True, bbox_inches="tight")
+
+
 def print_results(results, config):
     print("-" * 40)
     print(f"Task: {config.task_name.upper()}")
@@ -434,7 +509,7 @@ def main():
     ema_model = trainer.ema.ema_model
 
     # Sample the model with different guidance scales
-    res_x, res_y = sampling(
+    res_x, res_y, cond_points = sampling(
         task, config, ema_model, guidance_scale=config.guidance_scale, d_best=d_best
     )
     results = evaluation(task, config, res_y)
@@ -448,6 +523,26 @@ def main():
     print_results(results, config)
 
     if config.save_dir is not None:
+        res_y = np.asarray(res_y)
+        res_x = np.asarray(res_x)
+        cond_points = np.asarray(cond_points)
+        # Save the results and plot the D-best paretoflow + the actual points
+        plot_results(
+            d_best,
+            cond_points=cond_points,
+            res_y=res_y,
+            config=config,
+            save_dir=config.save_dir,
+        )
+
+        np.savez(
+            config.save_dir / "data.npy",
+            d_best=d_best,
+            res_y=res_y,
+            res_x=res_x,
+            cond_points=cond_points,
+        )
+
         with (config.save_dir / "results.json").open("w") as ofstream:
             # Ensure that the results do not contain e.g. numpy objects
             json.dump(results, ofstream)
