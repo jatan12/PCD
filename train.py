@@ -416,9 +416,10 @@ def setup_wandb(config):
 
 
 def plot_results(d_best, cond_points, res_y, config, save_dir):
+    print(f"D-best: {d_best.shape}")
     if d_best.shape[1] == 3:
         fig = plt.figure(figsize=(10, 8))
-        ax = fig.add_subplotse(111, projection="3d")
+        ax = fig.add_subplot(111, projection="3d")
 
         ax.scatter(
             d_best[:, 0],
@@ -431,7 +432,7 @@ def plot_results(d_best, cond_points, res_y, config, save_dir):
             cond_points[:, 0],
             cond_points[:, 1],
             cond_points[:, 2],
-            color=COLORS["light-orange"],
+            color=COLORS["orange"],
             label="cond-points",
         )
 
@@ -439,7 +440,7 @@ def plot_results(d_best, cond_points, res_y, config, save_dir):
             res_y[:, 0],
             res_y[:, 1],
             res_y[:, 2],
-            color=COLORS["green"],
+            color=COLORS["purple"],
             label="y",
         )
         ax.legend(fontsize="large")
@@ -456,14 +457,14 @@ def plot_results(d_best, cond_points, res_y, config, save_dir):
         ax.scatter(
             cond_points[:, 0],
             cond_points[:, 1],
-            color=COLORS["light-orange"],
+            color=COLORS["orange"],
             label="cond-points",
         )
 
         ax.scatter(
             res_y[:, 0],
             res_y[:, 1],
-            color=COLORS["green"],
+            color=COLORS["purple"],
             label="y",
         )
         ax.legend(fontsize="large")
@@ -526,17 +527,23 @@ def main():
         res_y = np.asarray(res_y)
         res_x = np.asarray(res_x)
         cond_points = np.asarray(cond_points)
+    
+        if config.normalize_method_ys:
+            plot_y = task.normalize_y(res_y)
+        else:
+            plot_y = res_y
+
         # Save the results and plot the D-best paretoflow + the actual points
         plot_results(
             d_best,
             cond_points=cond_points,
-            res_y=res_y,
+            res_y=plot_y,
             config=config,
             save_dir=config.save_dir,
         )
 
         np.savez(
-            config.save_dir / "data.npy",
+            config.save_dir / "data.npz",
             d_best=d_best,
             res_y=res_y,
             res_x=res_x,
