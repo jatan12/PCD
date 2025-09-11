@@ -26,3 +26,11 @@ offline_moo/model/
 
 # Any test runs
 wandb/*
+
+# any temporary tables, figures etc
+*.tex
+*.jpg
+*.png
+*.svg
+*.ipynb
+temp_dir/*
