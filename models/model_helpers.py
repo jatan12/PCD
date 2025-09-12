@@ -29,7 +29,7 @@ class TaskConfig:
     normalize_xs: bool = False
     normalize_ys: bool = False
     normalize_method_xs: str = "z-score"
-    normalize_method_ys: str = "min-max"
+    normalize_method_ys: str = "z-score"
     num_pareto_solutions: int = 256
     use_val_split: bool = True
     val_ratio: float = 0.2

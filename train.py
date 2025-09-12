@@ -129,14 +129,16 @@ def create_task(
 
     if config.normalize_xs:
         print("Normalizing x values!")
-        task.map_normalize_x()
-        X = task.normalize_x(X, config.normalize_method_xs)
+        # task.map_normalize_x()
+        X = task.normalize_x(X, normalization_method=config.normalize_method_xs)
 
     if config.normalize_ys:
         print("Normalizing y values!")
-        task.map_normalize_y()
-        y = task.normalize_y(y, config.normalize_method_ys)
-        d_best = task.normalize_y(d_best, config.normalize_method_ys)
+        # task.map_normalize_y()
+        y = task.normalize_y(y, normalization_method=config.normalize_method_ys)
+        d_best = task.normalize_y(
+            d_best, normalization_method=config.normalize_method_ys
+        )
 
     X = X.astype(np.float32)
     y = y.astype(np.float32)
@@ -391,8 +393,6 @@ def setup_wandb(config):
         config, dict_factory=lambda x: {k: v for (k, v) in x if k not in exclude_list}
     )
 
-    experiment_name = config.experiment_name
-
     cfg.update(
         {
             "slurm_job_id": get_slurm_job_id(),
@@ -408,6 +408,7 @@ def setup_wandb(config):
         }
     )
     run_name = f"{config.task_name}-{config.seed}"
+    experiment_name = f"{config.domain}-{config.task_name}-{config.experiment_name}"
     wandb.init(
         name=run_name,
         job_type="train",
@@ -564,7 +565,7 @@ def main():
         res_x = np.asarray(res_x)
         cond_points = np.asarray(cond_points)
 
-        if config.normalize_method_ys:
+        if config.normalize_ys:
             plot_y = task.normalize_y(res_y)
         else:
             plot_y = res_y
