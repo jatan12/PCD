@@ -419,7 +419,7 @@ class Trainer(object):
         ema_update_every: int = 10,
         ema_decay: float = 0.995,
         adam_betas: Tuple[float, float] = (0.9, 0.99),
-        save_and_sample_every: int = 10000,
+        sample_every: int = 10000,
         weight_decay: float = 0.0,
         results_folder: str = "./results",
         amp: bool = False,
@@ -454,7 +454,7 @@ class Trainer(object):
         )
         print(f"Number of trainable parameters: {num_params}.")
 
-        self.save_and_sample_every = save_and_sample_every
+        self.sample_every = sample_every
         self.train_num_steps = train_num_steps
         self.gradient_accumulate_every = gradient_accumulate_every
 
@@ -650,9 +650,9 @@ class Trainer(object):
 
                     if (
                         self.step != 0
-                        and self.step % self.save_and_sample_every == 0
+                        and self.step % self.sample_every == 0
                     ):
-                        self.save(self.step)
+                        #self.save(self.step)
                         val_loss = self.validate()
                         if val_loss is not None:
                             print(
@@ -672,6 +672,7 @@ class Trainer(object):
                     self.lr_scheduler.step()
 
         accelerator.print("training complete")
+        self.save("final") # <- Save only the final model
 
     # Allow user to pass in external data.
     def train_on_batch(
@@ -728,8 +729,9 @@ class Trainer(object):
             self.ema.to(device)
             self.ema.update()
 
-            if self.step != 0 and self.step % self.save_and_sample_every == 0:
-                self.save(self.step)
+            if self.step != 0 and self.step % self.sample_every == 0:
+                pass
+                #self.save(self.step)
 
         if self.lr_scheduler is not None:
             self.lr_scheduler.step()
