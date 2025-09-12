@@ -591,7 +591,7 @@ def main():
             **cfg_dct
         }
 
-        with (config.save_dir / "config.json", 'r') as ofstream:
+        with (config.save_dir / "config.json").open('r') as ofstream:
             json.dump(cfg_dct)
 
         res_y = np.asarray(res_y)
