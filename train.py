@@ -561,6 +561,41 @@ def main():
     print_results(results, config)
 
     if config.save_dir is not None:
+
+        # Save the configuration
+        
+        cfg_dct = asdict(config)
+
+        # Query some params to the configuration
+        cfg_dct = {
+            "train_num_steps": gin.query_parameter("Trainer.train_num_step"),
+            "lr": gin.query_parameter(
+                "Trainer.train_lr"
+            ),
+            "mlp_width": gin.query_parameter(
+                "ResidualMLPDenoiser.mlp_width"
+            ),
+            "num_layers": gin.query_parameter(
+                "ResidualMLPDenoiser.num_layers"
+            ),
+            "time_dim": gin.query_parameter(
+                "ResidualMLPDenoiser.dim_t"
+            ),
+            "reweight_num_bins": gin.query_parameter(
+                "reweight_multi_objective.num_bins"
+            ),
+            "reweight_k": gin.query_parameter("reweight_multi_objective.k"),
+            "reweight_tau": gin.query_parameter("reweight_multi_objective.tau"),
+            "reweight_normalize_dom_counts": gin.query_parameter(
+                "reweight_multi_objective.normalize_dom_counts"
+            ),
+            **cfg_dct
+        }
+
+        with (config.save_dir / "config.json", 'r') as ofstream:
+            json.dump(cfg_dct)
+
+
         res_y = np.asarray(res_y)
         res_x = np.asarray(res_x)
         cond_points = np.asarray(cond_points)
