@@ -561,7 +561,6 @@ def main():
     print_results(results, config)
 
     if config.save_dir is not None:
-
         # Save the configuration
         
         cfg_dct = asdict(config)
@@ -594,7 +593,6 @@ def main():
 
         with (config.save_dir / "config.json", 'r') as ofstream:
             json.dump(cfg_dct)
-
 
         res_y = np.asarray(res_y)
         res_x = np.asarray(res_x)
