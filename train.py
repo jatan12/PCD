@@ -46,9 +46,8 @@ try:
         print(f"EvoBenchX: {str(data_path)!r} does not exist!")
         raise
     #  econfig(str(db_path), str(data_path))
-
-except Exception:
-    print("Could  not configure EvoBenchX! Continuing without it!")
+except Exception as e:
+    print(f"Could  not configure EvoBenchX! ({e}) Continuing without it!")
 
 palette = sns.color_palette("colorblind")
 COLORS = {
@@ -214,7 +213,11 @@ def train_diffusion(
     )
 
     trainer = elucidated_diffusion.Trainer(
-        diffusion, train_dataset, val_dataset, use_wandb=config.use_wandb
+        diffusion,
+        train_dataset,
+        val_dataset,
+        use_wandb=config.use_wandb,
+        results_folder=config.save_dir,
     )
 
     trainer.train()

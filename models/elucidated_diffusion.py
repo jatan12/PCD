@@ -524,7 +524,7 @@ class Trainer(object):
                 diffusion_model, beta=ema_decay, update_every=ema_update_every
             )
             self.results_folder = pathlib.Path(results_folder)
-            self.results_folder.mkdir(exist_ok=True)
+            self.results_folder.mkdir(exist_ok=True, parents=True)
 
         # step counter state
         self.step = 0
