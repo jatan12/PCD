@@ -320,6 +320,7 @@ def sample_along_ref_dirs(
     seed: int = 42,
 ) -> np.ndarray:
     ref_dirs = get_reference_directions("energy", d_best.shape[1], k, seed=seed)
+    d_best = d_best.astype(np.float64)
     fronts, rank = NonDominatedSorting().do(
         d_best, return_rank=True, n_stop_if_ranked=k
     )  # We need at most k values
