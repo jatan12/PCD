@@ -20,6 +20,7 @@ from models.model_helpers import (
     get_slurm_task_id,
     parse_args,
     reweight_multi_objective,
+    sample_along_ref_dirs,
     sample_uniform_direction,
     sample_uniform_toward_ideal,
     set_seed,
@@ -182,7 +183,7 @@ def train_diffusion(
     y_train_tensor = torch.from_numpy(y_train).float()
     if config.reweight_loss:
         print("Using reweighted loss")
-        weights = reweight_multi_objective(y_train, num_bins=20)
+        weights = reweight_multi_objective(y_train)
         print(
             f" mu {weights.mean():.2f}, sd {np.std(weights):.2f}, ({weights.min():.2f}, {weights.max():.2f})"
         )
@@ -253,16 +254,23 @@ def sampling(
     """
     assert config.sampling_method in ("uniform-ideal", "uniform-direction")
 
-    if config.sampling_method == "uniform-ideal":
-        # Sample extrapolated conditioning points
-        cond_points = sample_uniform_toward_ideal(
-            d_best=d_best,
-            k=32,
-        )
-    else:
-        # Sample extrapolated points, where samples are extrapolated in random
-        # directions
-        cond_points = sample_uniform_direction(d_best=d_best, k=32, alpha=0.4)
+    match config.sampling_method:
+        case "uniform-ideal":
+            cond_points = sample_uniform_toward_ideal(
+                d_best=d_best, k=config.num_representative_points
+            )
+        case "uniform-direction":
+            cond_points = sample_uniform_direction(
+                d_best=d_best, k=config.num_representative_points, alpha=0.4
+            )
+        case "reference-direction":
+            cond_points = sample_along_ref_dirs(
+                d_best=d_best,
+                k=config.num_representative_points,
+                num_points=config.num_pareto_solutions,
+            )
+        case _:
+            assert False, config.sampling_method
 
     cond_points_tensor = torch.from_numpy(cond_points).float()
 

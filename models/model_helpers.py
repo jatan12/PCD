@@ -12,7 +12,9 @@ import scipy
 import torch
 from pygmo import fast_non_dominated_sorting
 from pymoo.algorithms.moo.nsga2 import calc_crowding_distance
+from pymoo.algorithms.moo.nsga3 import calc_niche_count, niching
 from pymoo.factory import get_reference_directions
+from pymoo.util.function_loader import load_function
 from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
 
 
@@ -30,6 +32,7 @@ class TaskConfig:
     normalize_ys: bool = False
     normalize_method_xs: str = "z-score"
     normalize_method_ys: str = "z-score"
+    num_representative_points: int = 32
     num_pareto_solutions: int = 256
     use_val_split: bool = True
     val_ratio: float = 0.2
@@ -67,9 +70,7 @@ class MORLConfig(TaskConfig):
     domain: str = "morl"
     normalize_xs: bool = False
     normalize_ys: bool = True
-    gin_config_files: List[str] = field(
-        default_factory=lambda: ["./config/morl.gin"]
-    )
+    gin_config_files: List[str] = field(default_factory=lambda: ["./config/morl.gin"])
     gin_params: List[str] = field(default_factory=list)
 
 
@@ -149,7 +150,7 @@ def parse_args() -> TaskConfig:
     parser.add_argument(
         "--sampling-method",
         type=str,
-        choices=["uniform-ideal", "uniform-direction"],
+        choices=["uniform-ideal", "uniform-direction", "reference-direction"],
         default="uniform-ideal",
     )
     parser.add_argument("--sampling-guidance-scale", type=float, default=1.0)
@@ -163,6 +164,7 @@ def parse_args() -> TaskConfig:
         default=None,
         help='The name of the experiment. Used only if "--use_wandb" is set',
     )
+    parser.add_argument("-k", "--num-representive-points", type=int, default=32)
     parser.add_argument("--save_dir", type=pathlib.Path, default=None)
     parser.add_argument("--gin_params", nargs="*", default=[])
 
@@ -170,11 +172,7 @@ def parse_args() -> TaskConfig:
     ConfigClass = get_task_config(args.domain)
 
     # Create the save directory
-    exp_name = (
-        "experiment"
-        if args.experiment_name is None
-        else args.experiment_name
-    )
+    exp_name = "experiment" if args.experiment_name is None else args.experiment_name
 
     if args.save_dir is not None:
         save_dir = (
@@ -185,14 +183,14 @@ def parse_args() -> TaskConfig:
 
     # Ensure that the directory exists
     save_dir.mkdir(parents=True, exist_ok=True)
-    
-    
+
     config = ConfigClass(
         seed=args.seed,
         task_name=args.task_name,
         sampling_method=args.sampling_method,
         guidance_scale=args.sampling_guidance_scale,
         reweight_loss=args.reweight_loss,
+        num_representative_points=args.num_representative_points,
         data_pruning=args.data_pruning,
         data_preserved_ratio=args.data_preserved_ratio,
         use_wandb=args.use_wandb,
@@ -313,6 +311,82 @@ def reweight_multi_objective(
     return weights
 
 
+def sample_along_ref_dirs(
+    d_best: np.ndarray,
+    k: int,
+    num_points: int,
+    alpha_range: Tuple[float, float] = (0.1, 0.4),
+    noise_scale: float = 0.05,
+    seed: int = 42,
+) -> np.ndarray:
+    ref_dirs = get_reference_directions("energy", d_best.shape[1], k, seed=seed)
+    fronts, rank = NonDominatedSorting().do(
+        d_best, return_rank=True, n_stop_if_ranked=k
+    )  # We need at most k values
+
+    # Use non-dominated points as a starting point
+    points = d_best[fronts[0]]
+    point_indices = np.unique(
+        fronts[0]
+    )  # Keep count of the indices of the selected points
+
+    # If there are more non-dominated points than k, select subset of these points
+    if points.shape[0] > k:
+        inds = np.random.choice(np.arange(points.shape[0]), size=k, replace=False)
+        points = points[inds]
+        point_indices = point_indices[inds]
+
+    # Associate each point with a reference direction
+    dist_mtx = load_function("calc_perpendicular_distance")(d_best, ref_dirs)
+    niche_of_inds = np.argmin(dist_mtx, axis=1)
+    dist_to_niche = dist_mtx[np.arange(d_best.shape[0]), niche_of_inds]
+
+    # If there are less than k non-dominating points, choose points from other fronts
+    # such that reference directions with minimal number of points are considerd
+    front_index = 1
+    while points.shape[0] < k:
+        # If we have used all fronts, stop
+        if front_index > len(fronts):
+            # Gone through all fronts
+            break
+
+        current_front = fronts[front_index]
+        prev_fronts = fronts[: front_index - 1]
+        # We will always use all points from previous fronts
+        # before moving to the next one, so one can just use indices of all previous fronts
+        niche_count = calc_niche_count(len(ref_dirs), niche_of_inds[prev_fronts])
+        num_remaining = k - points.shape[0]
+
+        # assing points to the reference directions
+        S = niching(
+            d_best[current_front],
+            num_remaining,
+            niche_count,
+            niche_of_inds[current_front],
+            dist_to_niche[current_front],
+        )
+        point_indices = np.concatenate((point_indices, current_front[S].tolist()))
+        points = d_best[point_indices]
+        print(f"front_index: {front_index},  {points.shape=}")
+
+    assert len(points) == k
+
+    # Tile the directions for each chosen point
+    tiling_factor = num_points // k
+    point_dirs = niche_of_inds[point_indices]
+
+    directions = np.tile(ref_dirs[point_dirs], (tiling_factor, 1))
+    # Interpolate each point towards the closest reference direction with different values of sigma
+    min_alpha, max_alpha = alpha_range
+    alphas = np.random.uniform(min_alpha, max_alpha, size=num_points)
+    points = np.tile(points, (tiling_factor, 1)) - np.einsum(
+        "i,ij->ij", alphas, directions
+    )
+    # TODO: Add clipping
+    # Add some random noise to each point 
+    return np.random.normal(points, scale=noise_scale)
+
+
 def sample_uniform_direction(
     d_best: np.ndarray, k: int, alpha: float = 0.4, noise_scale: float = 0.05
 ):
@@ -378,52 +452,53 @@ def sample_uniform_toward_ideal(
     return np.clip(noisy_points, a_min=ideal_point, a_max=nadir_point)
 
 
-def sample_along_reference_vectors(
-    d_best: np.ndarray,
-    k: int,
-    seed: int = 42,
-    method: str = "energy",
-    alpha_range: Tuple[float, float] = (0.1, 0.3),
-    bounds: Tuple[float, float] = (0.0, 1.0),
-) -> np.ndarray:
-    """
-    Sample k points by moving inward from a normalized Pareto front
-    along reference directions.
-
-    Args:
-        d_best (np.ndarray): Normalized Pareto front, shape (N, M).
-        k (int): Number of points to sample.
-        seed (int): Random seed.
-        method (str): Reference direction generation method.
-        alpha_range (tuple): Range for step sizes toward the ideal point.
-        bounds (tuple): Clipping bounds for sampled points.
-
-    Returns:
-        np.ndarray: Sampled points of shape (k, M).
-    """
-    np.random.seed(seed)
-    n_obj = d_best.shape[1]
-
-    # Generate reference directions (assumed normalized)
-    ref_dirs = get_reference_directions(method, n_obj, k, seed=seed)
-
-    # Compute crowding distances and sanitize them
-    crowding_dist = calc_crowding_distance(d_best)
-    finite_max = np.nanmax(crowding_dist[np.isfinite(crowding_dist)])
-    crowding_dist = np.where(np.isinf(crowding_dist), finite_max * 10, crowding_dist)
-    crowding_dist = np.nan_to_num(crowding_dist, nan=0.0)
-
-    # Normalize to get sampling probabilities or fallback to uniform
-    total_dist = np.sum(crowding_dist)
-    prob = crowding_dist / total_dist if total_dist > 0 else None
-
-    # Sample base points from d_best weighted by crowding distance
-    idx = np.random.choice(len(d_best), size=k, replace=True, p=prob)
-    base_points = d_best[idx]
-
-    # Sample step sizes and move inward along reference directions
-    alphas = np.random.uniform(*alpha_range, size=(k, 1))
-    sampled_points = base_points - alphas * ref_dirs
-
-    # Clip points within bounds
-    return np.clip(sampled_points, bounds[0], bounds[1])
+# TODO: This is deprecated, remove it
+# def sample_along_reference_vectors(
+#     d_best: np.ndarray,
+#     k: int,
+#     seed: int = 42,
+#     method: str = "energy",
+#     alpha_range: Tuple[float, float] = (0.1, 0.3),
+#     bounds: Tuple[float, float] = (0.0, 1.0),
+# ) -> np.ndarray:
+#     """
+#     Sample k points by moving inward from a normalized Pareto front
+#     along reference directions.
+#
+#     Args:
+#         d_best (np.ndarray): Normalized Pareto front, shape (N, M).
+#         k (int): Number of points to sample.
+#         seed (int): Random seed.
+#         method (str): Reference direction generation method.
+#         alpha_range (tuple): Range for step sizes toward the ideal point.
+#         bounds (tuple): Clipping bounds for sampled points.
+#
+#     Returns:
+#         np.ndarray: Sampled points of shape (k, M).
+#     """
+#     np.random.seed(seed)
+#     n_obj = d_best.shape[1]
+#
+#     # Generate reference directions (assumed normalized)
+#     ref_dirs = get_reference_directions(method, n_obj, k, seed=seed)
+#
+#     # Compute crowding distances and sanitize them
+#     crowding_dist = calc_crowding_distance(d_best)
+#     finite_max = np.nanmax(crowding_dist[np.isfinite(crowding_dist)])
+#     crowding_dist = np.where(np.isinf(crowding_dist), finite_max * 10, crowding_dist)
+#     crowding_dist = np.nan_to_num(crowding_dist, nan=0.0)
+#
+#     # Normalize to get sampling probabilities or fallback to uniform
+#     total_dist = np.sum(crowding_dist)
+#     prob = crowding_dist / total_dist if total_dist > 0 else None
+#
+#     # Sample base points from d_best weighted by crowding distance
+#     idx = np.random.choice(len(d_best), size=k, replace=True, p=prob)
+#     base_points = d_best[idx]
+#
+#     # Sample step sizes and move inward along reference directions
+#     alphas = np.random.uniform(*alpha_range, size=(k, 1))
+#     sampled_points = base_points - alphas * ref_dirs
+#
+#     # Clip points within bounds
+#     return np.clip(sampled_points, bounds[0], bounds[1])
