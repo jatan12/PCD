@@ -256,16 +256,16 @@ def sampling(
 
     if config.sampling_method == "uniform-ideal":
         cond_points = sample_uniform_toward_ideal(
-            d_best=d_best, k=config.num_representative_points
+            d_best=d_best, k=config.num_cond_points
         )
     elif config.sampling_method == "uniform-direction":
         cond_points = sample_uniform_direction(
-            d_best=d_best, k=config.num_representative_points, alpha=0.4
+            d_best=d_best, k=config.num_cond_points, alpha=0.4
         )
     elif config.sampling_method == "reference-direction":
         cond_points = sample_along_ref_dirs(
             d_best=d_best,
-            k=config.num_representative_points,
+            k=config.num_cond_points,
             num_points=config.num_pareto_solutions,
         )
     else:

@@ -32,7 +32,7 @@ class TaskConfig:
     normalize_ys: bool = False
     normalize_method_xs: str = "z-score"
     normalize_method_ys: str = "z-score"
-    num_representative_points: int = 32
+    num_cond_points: int = 32
     num_pareto_solutions: int = 256
     use_val_split: bool = True
     val_ratio: float = 0.2
@@ -164,7 +164,7 @@ def parse_args() -> TaskConfig:
         default=None,
         help='The name of the experiment. Used only if "--use_wandb" is set',
     )
-    parser.add_argument("-k", "--num-representive-points", type=int, default=32)
+    parser.add_argument("-k", "--num-cond-points", type=int, default=32)
     parser.add_argument("--save_dir", type=pathlib.Path, default=None)
     parser.add_argument("--gin_params", nargs="*", default=[])
 
@@ -190,7 +190,7 @@ def parse_args() -> TaskConfig:
         sampling_method=args.sampling_method,
         guidance_scale=args.sampling_guidance_scale,
         reweight_loss=args.reweight_loss,
-        num_representative_points=args.num_representative_points,
+        num_cond_points=args.num_cond_points,
         data_pruning=args.data_pruning,
         data_preserved_ratio=args.data_preserved_ratio,
         use_wandb=args.use_wandb,
