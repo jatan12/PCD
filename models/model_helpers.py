@@ -11,8 +11,9 @@ import numpy as np
 import scipy
 import torch
 from pygmo import fast_non_dominated_sorting
-from pymoo.algorithms.moo.nsga2 import calc_crowding_distance
-from pymoo.algorithms.moo.nsga3 import calc_niche_count, niching
+
+# from pymoo.algorithms.moo.nsga2 import calc_crowding_distance
+from pymoo.algorithms.moo.nsga3 import calc_niche_count
 from pymoo.factory import get_reference_directions
 from pymoo.util.function_loader import load_function
 from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
@@ -33,6 +34,7 @@ class TaskConfig:
     normalize_method_xs: str = "z-score"
     normalize_method_ys: str = "z-score"
     num_cond_points: int = 32
+    sampling_noise_scale: float = 0.05
     num_pareto_solutions: int = 256
     use_val_split: bool = True
     val_ratio: float = 0.2
@@ -165,6 +167,7 @@ def parse_args() -> TaskConfig:
         help='The name of the experiment. Used only if "--use_wandb" is set',
     )
     parser.add_argument("-k", "--num-cond-points", type=int, default=32)
+    parser.add_argument("--sampling-noise-scale", type=float, default=0.05)
     parser.add_argument("--save_dir", type=pathlib.Path, default=None)
     parser.add_argument("--gin_params", nargs="*", default=[])
 
@@ -190,6 +193,7 @@ def parse_args() -> TaskConfig:
         sampling_method=args.sampling_method,
         guidance_scale=args.sampling_guidance_scale,
         reweight_loss=args.reweight_loss,
+        sampling_noise_scale=args.sampling_noise_scale,
         num_cond_points=args.num_cond_points,
         data_pruning=args.data_pruning,
         data_preserved_ratio=args.data_preserved_ratio,
@@ -311,6 +315,64 @@ def reweight_multi_objective(
     return weights
 
 
+def _niching(
+    pop,
+    n_remaining,
+    niche_count,
+    niche_of_individuals,
+    dist_to_niche,
+):
+    # Very slightly modified procedure for niching from Pymoo
+    survivors = []
+
+    # boolean array of elements that are considered for each iteration
+    mask = np.full(len(pop), True)
+
+    while len(survivors) < n_remaining:
+        # If all points from this set of points have been considered, stop
+        if np.all(~mask):
+            break
+        # number of individuals to select in this iteration
+        n_select = n_remaining - len(survivors)
+
+        # all niches where new individuals can be assigned to and the
+        # corresponding niche count
+        next_niches_list = np.unique(niche_of_individuals[mask])
+        next_niche_count = niche_count[next_niches_list]
+
+        # the minimum niche count
+        min_niche_count = next_niche_count.min()
+
+        # all niches with the minimum niche count
+        # (truncate randomly if there are more niches than remaining individuals)
+        next_niches = next_niches_list[np.where(next_niche_count == min_niche_count)[0]]
+        next_niches = next_niches[np.random.permutation(len(next_niches))[:n_select]]
+
+        for next_niche in next_niches:
+            # indices of individuals that are considered and assign to next_niche
+            next_ind = np.where(
+                np.logical_and(niche_of_individuals == next_niche, mask)
+            )[0]
+
+            # shuffle to break random tie (equal perp. dist) or select randomly
+            np.random.shuffle(next_ind)
+
+            if niche_count[next_niche] == 0:
+                next_ind = next_ind[np.argmin(dist_to_niche[next_ind])]
+            else:
+                # already randomized through shuffling
+                next_ind = next_ind[0]
+
+            # add the selected individual to the survivors
+            mask[next_ind] = False
+            survivors.append(int(next_ind))
+
+            # increase the corresponding niche count
+            niche_count[next_niche] += 1
+
+    return survivors
+
+
 def sample_along_ref_dirs(
     d_best: np.ndarray,
     k: int,
@@ -353,13 +415,14 @@ def sample_along_ref_dirs(
 
         current_front = fronts[front_index]
         prev_fronts = fronts[: front_index - 1]
+        front_index += 1
         # We will always use all points from previous fronts
         # before moving to the next one, so one can just use indices of all previous fronts
         niche_count = calc_niche_count(len(ref_dirs), niche_of_inds[prev_fronts])
         num_remaining = k - points.shape[0]
 
         # assing points to the reference directions
-        S = niching(
+        S = _niching(
             d_best[current_front],
             num_remaining,
             niche_count,
@@ -368,7 +431,6 @@ def sample_along_ref_dirs(
         )
         point_indices = np.concatenate((point_indices, current_front[S].tolist()))
         points = d_best[point_indices]
-        print(f"front_index: {front_index},  {points.shape=}")
 
     assert len(points) == k
 
@@ -377,15 +439,20 @@ def sample_along_ref_dirs(
     point_dirs = niche_of_inds[point_indices]
 
     directions = np.tile(ref_dirs[point_dirs], (tiling_factor, 1))
-    # Interpolate each point towards the closest reference direction with different values of sigma
+    # Interpolate each point towards the closest reference direction with
+    # different length
     min_alpha, max_alpha = alpha_range
     alphas = np.random.uniform(min_alpha, max_alpha, size=num_points)
     points = np.tile(points, (tiling_factor, 1)) - np.einsum(
         "i,ij->ij", alphas, directions
     )
+
     # TODO: Add clipping
-    # Add some random noise to each point 
-    return np.random.normal(points, scale=noise_scale)
+    return (
+        points
+        if abs(noise_scale) < 1e-10
+        else np.random.normal(points, scale=noise_scale)
+    )
 
 
 def sample_uniform_direction(

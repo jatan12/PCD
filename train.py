@@ -267,6 +267,7 @@ def sampling(
             d_best=d_best,
             k=config.num_cond_points,
             num_points=config.num_pareto_solutions,
+            noise_scale=config.sampling_noise_scale
         )
     else:
         assert False, config.sampling_method
