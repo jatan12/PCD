@@ -252,25 +252,24 @@ def sampling(
         ValueError:
             If num_pareto_solutions is not divisible by conditioning points.
     """
-    assert config.sampling_method in ("uniform-ideal", "uniform-direction")
+    # assert config.sampling_method in ("uniform-ideal", "uniform-direction", )
 
-    match config.sampling_method:
-        case "uniform-ideal":
-            cond_points = sample_uniform_toward_ideal(
-                d_best=d_best, k=config.num_representative_points
-            )
-        case "uniform-direction":
-            cond_points = sample_uniform_direction(
-                d_best=d_best, k=config.num_representative_points, alpha=0.4
-            )
-        case "reference-direction":
-            cond_points = sample_along_ref_dirs(
-                d_best=d_best,
-                k=config.num_representative_points,
-                num_points=config.num_pareto_solutions,
-            )
-        case _:
-            assert False, config.sampling_method
+    if config.sampling_method == "uniform-ideal":
+        cond_points = sample_uniform_toward_ideal(
+            d_best=d_best, k=config.num_representative_points
+        )
+    elif config.sampling_method == "uniform-direction":
+        cond_points = sample_uniform_direction(
+            d_best=d_best, k=config.num_representative_points, alpha=0.4
+        )
+    elif config.sampling_method == "reference-direction":
+        cond_points = sample_along_ref_dirs(
+            d_best=d_best,
+            k=config.num_representative_points,
+            num_points=config.num_pareto_solutions,
+        )
+    else:
+        assert False, config.sampling_method
 
     cond_points_tensor = torch.from_numpy(cond_points).float()
 
