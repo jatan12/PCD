@@ -414,7 +414,11 @@ def sample_along_ref_dirs(
             break
 
         current_front = fronts[front_index]
-        prev_fronts = fronts[: front_index - 1]
+        if front_index == 1:
+            prev_fronts = fronts[:front_index-1]
+        else:
+            prev_fronts = np.concatenate(fronts[:front_index-1])
+
         front_index += 1
         # We will always use all points from previous fronts
         # before moving to the next one, so one can just use indices of all previous fronts
