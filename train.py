@@ -228,12 +228,48 @@ def train_diffusion(
     return trainer
 
 
+def get_cond_points(config, d_best: np.ndarray) -> torch.Tensor:
+    if config.sampling_method == "uniform-ideal":
+        cond_points = sample_uniform_toward_ideal(
+            d_best=d_best, k=config.num_cond_points
+        )
+    elif config.sampling_method == "uniform-direction":
+        cond_points = sample_uniform_direction(
+            d_best=d_best, k=config.num_cond_points, alpha=0.4
+        )
+    elif config.sampling_method == "reference-direction":
+        cond_points = sample_along_ref_dirs(
+            d_best=d_best,
+            k=config.num_cond_points,
+            num_points=config.num_pareto_solutions,
+            noise_scale=config.sampling_noise_scale,
+        )
+    else:
+        assert False, config.sampling_method
+
+    cond_points_tensor = torch.from_numpy(cond_points).float()
+
+    if config.num_pareto_solutions % cond_points_tensor.shape[0] != 0:
+        raise ValueError(
+            f"num_pareto_solutions ({config.num_pareto_solutions}) must be "
+            f"divisible by conditioning points ({cond_points_tensor.shape[0]})"
+        )
+
+    if cond_points_tensor.shape[0] != config.num_pareto_solutions:
+        batch_interleave = config.num_pareto_solutions // cond_points_tensor.shape[0]
+        cond_points_tensor = cond_points_tensor.repeat_interleave(
+            batch_interleave, dim=0
+        )
+
+    return cond_points_tensor
+
+
 def sampling(
     task,
     config,
     diffusion,
     guidance_scale: float,
-    d_best: np.ndarray,
+    cond_points: torch.Tensor,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Generate samples from the
@@ -254,46 +290,9 @@ def sampling(
     """
     # assert config.sampling_method in ("uniform-ideal", "uniform-direction", )
 
-    if config.sampling_method == "uniform-ideal":
-        cond_points = sample_uniform_toward_ideal(
-            d_best=d_best, k=config.num_cond_points
-        )
-    elif config.sampling_method == "uniform-direction":
-        cond_points = sample_uniform_direction(
-            d_best=d_best, k=config.num_cond_points, alpha=0.4
-        )
-    elif config.sampling_method == "reference-direction":
-        cond_points = sample_along_ref_dirs(
-            d_best=d_best,
-            k=config.num_cond_points,
-            num_points=config.num_pareto_solutions,
-            noise_scale=config.sampling_noise_scale
-        )
-    else:
-        assert False, config.sampling_method
-
-    cond_points_tensor = torch.from_numpy(cond_points).float()
-
-    if config.num_pareto_solutions % cond_points_tensor.shape[0] != 0:
-        raise ValueError(
-            f"num_pareto_solutions ({config.num_pareto_solutions}) must be "
-            f"divisible by conditioning points ({cond_points_tensor.shape[0]})"
-        )
-
-    if cond_points_tensor.shape[0] != config.num_pareto_solutions:
-        batch_interleave = config.num_pareto_solutions // cond_points_tensor.shape[0]
-        cond_points_tensor = cond_points_tensor.repeat_interleave(
-            batch_interleave, dim=0
-        )
-
-    print(
-        f"Sampling for {cond_points_tensor.shape[0]} solutions! "
-        f"with {cond_points_tensor.shape=} and scale {guidance_scale:.2f}"
-    )
-
     res_x = diffusion.sample(
-        batch_size=cond_points_tensor.shape[0],
-        cond=cond_points_tensor,
+        batch_size=cond_points.shape[0],
+        cond=cond_points,
         guidance_scale=guidance_scale,
         clamp=False,
     )
@@ -427,7 +426,7 @@ def setup_wandb(config):
     )
 
 
-def plot_results(d_best, cond_points, res_y, config, save_dir):
+def plot_results(d_best, cond_points, res_y, config, save_dir, index):
     print(f"D-best: {d_best.shape}")
 
     y_color = COLORS["purple"]
@@ -518,19 +517,19 @@ def plot_results(d_best, cond_points, res_y, config, save_dir):
                 axs[i, j].legend(fontsize="large")
         fig.subplots_adjust(wspace=0.4, hspace=0.4)
 
-    fig.savefig(save_dir / "pareto_front.png", dpi=400, bbox_inches="tight")
-    fig.savefig(save_dir / "pareto_front.svg", transparent=True, bbox_inches="tight")
+    fig.savefig(save_dir / f"pareto_front_{index}.png", dpi=400, bbox_inches="tight")
+    fig.savefig(
+        save_dir / f"pareto_front_{index}.svg", transparent=True, bbox_inches="tight"
+    )
 
 
 def print_results(results, config):
     print("-" * 40)
     print(
-            f"Task: {config.task_name.upper()} | "
-            f"Guidance scale {results['guidance_scale']:.2f}"
+        f"Task: {config.task_name.upper()} | "
+        f"Guidance scale {results['guidance_scale']:.2f}"
     )
-    print(
-        f"Task: {config.task_name.upper()}"
-    )
+    print(f"Task: {config.task_name.upper()}")
     print(f"{'Metric':<25} {'Value':>10}")
     print("-" * 40)
     print(f"{'Hypervolume (D(best))':<25} {results['hv_d_best']:10.4f}")
@@ -560,23 +559,55 @@ def main():
     trainer = train_diffusion(config, X, y)
     ema_model = trainer.ema.ema_model
 
+    # NOTE: Condition points are sampled only once, since they should remain
+    # constant for different guidance scales
+    cond_points = get_cond_points(config, d_best)
+    cond_points_np = cond_points.cpu().to_numpy()
+    print(
+        f"Sampling for {cond_points_np.shape[0]} "
+        f"solutions ({len(np.unique(cond_points_np))} unique points)"
+    )
+
     all_results = []
-    for scale in config.guidance_scale:
+    all_points = {"cond_points": cond_points_np, "d_best": d_best}
+
+    for i, scale in enumerate(config.guidance_scale):
+        print(f"====== Guidance scale {scale:.2f} ========")
         res_x, res_y = sampling(
-                task, config, ema_model, d_best, guidance_scale=scale
+            task, config, ema_model, cond_points=cond_points, guidance_scale=scale
         )
         results = evaluation(task, config, res_y)
 
         results["guidance_scale"] = scale
+        results["res_id"] = i
         # Ensure that no e.g. numpy results are in the data
-        results = {key: float(val) for key, val in results.items()} 
+        results = {key: float(val) for key, val in results.items()}
         print()
         print_results(results, config)
         all_results.append(results)
 
+        res_y = np.asarray(res_y)
+        res_x = np.asarray(res_x)
+        all_points[f"res_x_{i}"] = res_x
+        all_points[f"res_y_{i}"] = res_y
+
+        if config.normalize_ys:
+            plot_y = task.normalize_y(res_y)
+        else:
+            plot_y = res_y
+
+        # Save the results and plot the D-best paretoflow + the actual points
+        plot_results(
+            d_best,
+            cond_points=cond_points,
+            res_y=plot_y,
+            config=config,
+            save_dir=config.save_dir,
+            index=i,
+        )
+
         if config.use_wandb:
             wandb.log(results)
-
 
     if config.save_dir is not None:
         # Save the configuration
@@ -616,27 +647,7 @@ def main():
         res_x = np.asarray(res_x)
         cond_points = np.asarray(cond_points)
 
-        if config.normalize_ys:
-            plot_y = task.normalize_y(res_y)
-        else:
-            plot_y = res_y
-
-        # Save the results and plot the D-best paretoflow + the actual points
-        plot_results(
-            d_best,
-            cond_points=cond_points,
-            res_y=plot_y,
-            config=config,
-            save_dir=config.save_dir,
-        )
-
-        np.savez(
-            config.save_dir / "data.npz",
-            d_best=d_best,
-            res_y=res_y,
-            res_x=res_x,
-            cond_points=cond_points,
-        )
+        np.savez(config.save_dir / "data.npz", **all_points)
 
         with (config.save_dir / "results.json").open("w") as ofstream:
             # Ensure that the results do not contain e.g. numpy objects
