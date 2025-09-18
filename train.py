@@ -289,11 +289,6 @@ def sampling(
             If num_pareto_solutions is not divisible by conditioning points.
     """
     # assert config.sampling_method in ("uniform-ideal", "uniform-direction", )
-
-    print(
-        f"Sampling for {cond_points_tensor.shape[0]} solutions! "
-        f"with {cond_points_tensor.shape=} and scale {guidance_scale:.2f}"
-    )
     res_x = diffusion.sample(
         batch_size=cond_points.shape[0],
         cond=cond_points,
