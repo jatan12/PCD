@@ -324,7 +324,7 @@ def sampling(
     else:
         res_y = task.predict(res_x)
 
-    return res_x, res_y, cond_points
+    return res_x, res_y 
 
 
 def evaluation(
@@ -561,7 +561,7 @@ def main():
     # NOTE: Condition points are sampled only once, since they should remain
     # constant for different guidance scales
     cond_points = get_cond_points(config, d_best)
-    cond_points_np = cond_points.cpu().to_numpy()
+    cond_points_np = cond_points.cpu().numpy()
     print(
         f"Sampling for {cond_points_np.shape[0]} "
         f"solutions ({len(np.unique(cond_points_np))} unique points)"
