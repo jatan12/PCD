@@ -32,7 +32,6 @@ Trainer.weight_decay = 1e-3
 Trainer.train_num_steps = 4000
 Trainer.sample_every = 500
 
-# Reweighting
 reweight_multi_objective.num_bins = 30
 reweight_multi_objective.k = 10
 reweight_multi_objective.tau = 0.05
