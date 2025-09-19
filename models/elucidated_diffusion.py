@@ -6,7 +6,7 @@ import math
 import multiprocessing as mp
 import os
 import pathlib
-from typing import Literal, Optional, Sequence, Tuple, Union
+from typing import Optional, Sequence, Tuple, Union
 
 import gin
 import torch
@@ -64,7 +64,7 @@ class ElucidatedDiffusion(nn.Module):
         net: nn.Module,
         normalizer: BaseNormalizer,
         event_shape: Sequence[int],  # shape of the input and output
-        cond_drop_prob: float = 0.15,  # probability of dropping the condition
+        cond_drop_prob: float = 0.25,  # probability of dropping the condition
         num_sample_steps: int = 32,  # number of sampling steps
         sigma_min: float = 0.002,  # min noise level
         sigma_max: float = 80,  # max noise level
@@ -397,7 +397,8 @@ class ElucidatedDiffusion(nn.Module):
         losses = reduce(losses, "b ... -> b", "mean")
         losses = losses * self.loss_weight(
             sigmas
-        )  # Reweighted loss goes over here
+        )
+        # Reweighted loss goes over here -- what about scale?
         losses = losses * weights
         return losses.mean()
 
@@ -419,16 +420,18 @@ class Trainer(object):
         ema_update_every: int = 10,
         ema_decay: float = 0.995,
         adam_betas: Tuple[float, float] = (0.9, 0.99),
-        sample_every: int = 10000,
+        save_and_sample_every: int = 10000,
+        early_stopping_patience: int = 5,
+        early_stopping_threshold: float = 0.001,
         weight_decay: float = 0.0,
         results_folder: str = "./results",
         amp: bool = False,
         fp16: bool = False,
         split_batches: bool = True,
-        use_wandb: bool = False,
+        use_wandb: Optional[bool] = None,
     ):
         super().__init__()
-        
+
         self.use_wandb = use_wandb
         if self.use_wandb:
             wandb.config.update(
@@ -454,9 +457,15 @@ class Trainer(object):
         )
         print(f"Number of trainable parameters: {num_params}.")
 
-        self.sample_every = sample_every
+        self.save_and_sample_every = save_and_sample_every
         self.train_num_steps = train_num_steps
         self.gradient_accumulate_every = gradient_accumulate_every
+
+        # Early stopping configuration
+        self.early_stopping_patience = early_stopping_patience
+        self.early_stopping_threshold = early_stopping_threshold
+        self.best_val_loss = float('inf')
+        self.patience_counter = 0
 
         if dataset is not None:
             # If dataset size is less than 800K use the small batch size
@@ -524,7 +533,7 @@ class Trainer(object):
                 diffusion_model, beta=ema_decay, update_every=ema_update_every
             )
             self.results_folder = pathlib.Path(results_folder)
-            self.results_folder.mkdir(exist_ok=True, parents=True)
+            self.results_folder.mkdir(exist_ok=True)
 
         # step counter state
         self.step = 0
@@ -593,7 +602,7 @@ class Trainer(object):
         count = 0
 
         for batch in self.val_dl:
-            x, y, w= (t.to(self.accelerator.device) for t in batch)
+            x, y, w = (t.to(self.accelerator.device) for t in batch)
             loss = self.model(x, weights=w, cond=y)
             total_val_loss += loss.item()
             count += 1
@@ -650,48 +659,65 @@ class Trainer(object):
 
                     if (
                         self.step != 0
-                        and self.step % self.sample_every == 0
+                        and self.step % self.save_and_sample_every == 0
                     ):
-                        #self.save(self.step)
+                        # self.save(f"{self.step}-periodic")
                         val_loss = self.validate()
+
                         if val_loss is not None:
                             print(
                                 f"Validation loss at step {self.step}: "
-                                f"{val_loss:.4f}"
+                                f"{val_loss:.4f} (Best: {self.best_val_loss:.4f})"
                             )
-                            if self.use_wandb: 
+                            if self.use_wandb:
                                 wandb.log(
                                     {
                                         "step": self.step,
                                         "val_loss": val_loss,
                                     }
                                 )
+
+                            # Early stopping and saving the best model
+                            improvement = self.best_val_loss - val_loss
+                            if improvement > self.early_stopping_threshold:
+                                print(f"Validation loss improved by {improvement:.4f}. Resetting patience.")
+                                self.best_val_loss = val_loss
+                                self.patience_counter = 0
+                                # Save the best model
+                                self.save("best")
+                            else:
+                                self.patience_counter += 1
+                                print(f"No significant improvement. Patience: {self.patience_counter}/{self.early_stopping_patience}")
+
+                            if self.patience_counter >= self.early_stopping_patience:
+                                accelerator.print(f"Stopping early. No improvement in validation loss for {self.patience_counter} checks.")
+                                break
+
                 pbar.update(1)
 
                 if self.lr_scheduler is not None:
                     self.lr_scheduler.step()
 
         accelerator.print("training complete")
-        self.save("final") # <- Save only the final model
 
     # Allow user to pass in external data.
     def train_on_batch(
         self,
-        data: Tuple[torch.Tensor, torch.Tensor],
+        data: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
         use_wandb=False,
         splits=1,  # number of splits to split the batch into
         **kwargs,
     ):
-        assert len(data) == 2, "Input data should be a tuple of (x, y) tensors"
+        assert len(data) == 3, "Input data should be a tuple of (x, y, w) tensors"
         accelerator = self.accelerator
         device = accelerator.device
-        x, y = (t.to(device) for t in data)  # data = data.to(device)
+        x, y, w = (t.to(device) for t in data)  # data = data.to(device)
 
         total_loss = 0.0
 
         if splits == 1:
             with self.accelerator.autocast():
-                loss = self.model(x, cond=y, **kwargs)
+                loss = self.model(x, weights=w, cond=y, **kwargs)
                 total_loss += loss.item()
             self.accelerator.backward(loss)
         else:
@@ -699,10 +725,11 @@ class Trainer(object):
 
             split_x = torch.split(x, x.shape[0] // splits)
             split_y = torch.split(y, y.shape[0] // splits)
+            split_w = torch.split(w, w.shape[0] // splits)
 
-            for x_chunk, y_chunk in zip(split_x, split_y):
+            for x_chunk, y_chunk, w_chunk in zip(split_x, split_y, split_w):
                 with self.accelerator.autocast():
-                    loss = self.model(x_chunk, cond=y_chunk, **kwargs)
+                    loss = self.model(x_chunk, weights=w_chunk, cond=y_chunk, **kwargs)
                     loss = loss / splits
                     total_loss += loss.item()
                 self.accelerator.backward(loss)
@@ -729,9 +756,8 @@ class Trainer(object):
             self.ema.to(device)
             self.ema.update()
 
-            if self.step != 0 and self.step % self.sample_every == 0:
-                pass
-                #self.save(self.step)
+            if self.step != 0 and self.step % self.save_and_sample_every == 0:
+                self.save(self.step)
 
         if self.lr_scheduler is not None:
             self.lr_scheduler.step()

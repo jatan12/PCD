@@ -1,77 +1,38 @@
+from pprint import pprint
+from dataclasses import asdict
+from typing import Tuple, Dict, List, Optional
+
 import json
 import pathlib
-from dataclasses import asdict
-from pprint import pprint
-from typing import Dict, Tuple
-
 import gin
-import matplotlib.pyplot as plt
-import numpy as np
-import seaborn as sns
+import wandb
 import torch
+import numpy as np
 from sklearn.model_selection import train_test_split
 
 import offline_moo.off_moo_bench as ob
-import wandb
-from models import diffusion_utils, elucidated_diffusion
+from offline_moo.utils import get_quantile_solutions
+from offline_moo.off_moo_bench.task_set import ALLTASKSDICT
+from offline_moo.off_moo_bench.evaluation.metrics import hv
+
+from models import elucidated_diffusion, diffusion_utils
 from models.model_helpers import (
     TaskConfig,
-    get_slurm_job_id,
-    get_slurm_task_id,
     parse_args,
+    set_seed,
+    setup_wandb,
     reweight_multi_objective,
     sample_along_ref_dirs,
-    sample_uniform_direction,
-    sample_uniform_toward_ideal,
-    set_seed,
 )
-from offline_moo.off_moo_bench.evaluation.metrics import hv
-from offline_moo.off_moo_bench.task_set import ALLTASKSDICT
-from offline_moo.utils import get_quantile_solutions
-
-# Configure evobench
-try:
-    from evobenchx.database.init import config as econfig
-
-    off_moo_dir = (
-        pathlib.Path(__file__) / "offline_moo" / "off_moo_bench" / "problem" / "mo_nas"
-    ).resolve()
-
-    db_path = off_moo_dir / "database"
-    data_path = off_moo_dir / "data"
-    if not db_path.exists():
-        print(f"EvoBenchX: {str(db_path)!r} does not exist!")
-        raise
-
-    if not data_path.exists():
-        print(f"EvoBenchX: {str(data_path)!r} does not exist!")
-        raise
-    #  econfig(str(db_path), str(data_path))
-except Exception as e:
-    print(f"Could  not configure EvoBenchX! ({e}) Continuing without it!")
-
-palette = sns.color_palette("colorblind")
-COLORS = {
-    "blue": palette[0],
-    "light-orange": palette[1],
-    "green": palette[2],
-    "orange": palette[3],
-    "purple": palette[4],
-    "brown": palette[5],
-    "pink": palette[6],
-    "grey": palette[7],
-    "yellow": palette[8],
-    "light-blue": palette[9],
-}
 
 
-def create_task(
-    config: TaskConfig,
-) -> Tuple[
+def create_task(config: TaskConfig) -> Tuple[
     object,
     np.ndarray,
     np.ndarray,
     np.ndarray,
+    int,
+    Optional[int],
 ]:
     """
     Create and prepare a task dataset based on the given configuration.
@@ -80,8 +41,10 @@ def create_task(
         task (object): Instantiated task object.
         X (np.ndarray): Input features (normalized and reshaped if needed).
         y (np.ndarray): Target objective values.
-        d_best (np.ndarray): Non-dominated (Pareto-optimal) objectives,
-                             normalized if config.normalize_ys is True.
+        cond_points (np.ndarray): Top k Non-dominated (Pareto-optimal) points,
+                                  normalized if config.normalize_ys is True.
+        n_dim (int): Number of decision variables (before flattening).
+        n_classes (Optional[int]): Number of classes (only for discrete tasks).
     """
     task_name = config.task_name.lower()
     if task_name in ALLTASKSDICT:
@@ -104,16 +67,18 @@ def create_task(
             return_y=True,
         )
 
+    n_dim, n_classes = None, None
+
     if task.is_discrete:
-        task.map_to_logits()
         X = task.to_logits(X)
-        data_size, n_dim, n_classes = tuple(X.shape)
+        data_size, n_dim, n_classes = tuple(X.shape)   # preserve original info
         X = X.reshape(-1, n_dim * n_classes)
-
-    if task.is_sequence:
+    elif task.is_sequence:
         X = task.to_logits(X)
+        data_size, n_dim = X.shape
+    else:
+        data_size, n_dim = X.shape
 
-    data_size, n_dim = X.shape
     n_obj = y.shape[1]
 
     print(
@@ -121,31 +86,33 @@ def create_task(
         f"Data size: {data_size}\n"
         f"Number of objectives: {n_obj}\n"
         f"Number of dimensions: {n_dim}\n"
+        f"Number of classes: {n_classes if n_classes is not None else 'N/A'}\n"
     )
     print()
 
+    # Pick the top N non-dominated solutions for conditioning
     _, d_best = task.get_N_non_dominated_solutions(
         N=config.num_pareto_solutions, return_x=False, return_y=True
     )
 
+    # Utopia point, ideal point for each objectives
+    # utopia_point = np.min(y, axis=0).reshape(1, -1)
+
     if config.normalize_xs:
-        print("Normalizing x values!")
-        # task.map_normalize_x()
-        X = task.normalize_x(X, normalization_method=config.normalize_method_xs)
+        task.map_normalize_x()
+        X = task.normalize_x(X, config.normalize_method_xs)
 
     if config.normalize_ys:
-        print("Normalizing y values!")
-        # task.map_normalize_y()
-        y = task.normalize_y(y, normalization_method=config.normalize_method_ys)
-        d_best = task.normalize_y(
-            d_best, normalization_method=config.normalize_method_ys
-        )
+        task.map_normalize_y()
+        y = task.normalize_y(y, config.normalize_method_ys)
+        d_best = task.normalize_y(d_best, config.normalize_method_ys)
+        # utopia_point = task.normalize_y(utopia_point, config.normalize_method_ys)
 
     X = X.astype(np.float32)
     y = y.astype(np.float32)
     d_best = d_best.astype(np.float32)
 
-    return task, X, y, d_best
+    return task, X, y, d_best, n_dim, n_classes
 
 
 def train_diffusion(
@@ -169,7 +136,8 @@ def train_diffusion(
     """
     if config.use_val_split:
         X_train, X_val, y_train, y_val = train_test_split(
-            X, y, test_size=config.val_ratio, random_state=config.seed
+            X, y, test_size=config.val_ratio,
+            random_state=config.seed, shuffle=True,
         )
     else:
         X_train, y_train = X, y
@@ -181,11 +149,15 @@ def train_diffusion(
 
     X_train_tensor = torch.from_numpy(X_train).float()
     y_train_tensor = torch.from_numpy(y_train).float()
+
     if config.reweight_loss:
         print("Using reweighted loss")
-        weights = reweight_multi_objective(y_train)
+        weights = reweight_multi_objective(y_train)  # Hardcoded num_bins=20?
         print(
-            f" mu {weights.mean():.2f}, sd {np.std(weights):.2f}, ({weights.min():.2f}, {weights.max():.2f})"
+            (
+                f" mu {weights.mean():.2f}, sd {np.std(weights):.2f}, "
+                f"({weights.min():.2f}, {weights.max():.2f})"
+            )
         )
         weights_tensor = torch.from_numpy(weights).float()
     else:
@@ -198,14 +170,19 @@ def train_diffusion(
     )
 
     train_dataset = torch.utils.data.TensorDataset(
-        X_train_tensor, y_train_tensor, weights_tensor
+        X_train_tensor,
+        y_train_tensor,
+        weights_tensor,
     )
+
     if X_val is not None and y_val is not None:
         X_val_tensor = torch.from_numpy(X_val).float()
         y_val_tensor = torch.from_numpy(y_val).float()
         val_weights = torch.ones(y_val.shape[0]).float()
         val_dataset = torch.utils.data.TensorDataset(
-            X_val_tensor, y_val_tensor, val_weights
+            X_val_tensor,
+            y_val_tensor,
+            val_weights,
         )
     else:
         val_dataset = None
@@ -220,7 +197,7 @@ def train_diffusion(
         train_dataset,
         val_dataset,
         use_wandb=config.use_wandb,
-        results_folder=config.save_dir,
+        results_folder=config.model_dir,
     )
 
     trainer.train()
@@ -231,47 +208,36 @@ def train_diffusion(
 def sampling(
     task,
     config,
-    diffusion,
-    guidance_scale: float,
+    diffusion_model,
     d_best: np.ndarray,
-) -> Tuple[np.ndarray, np.ndarray]:
+    n_dim: Optional[int],
+    n_classes: Optional[int],
+) -> Tuple[List[np.ndarray], List[np.ndarray]]:
     """
     Generate samples from the
-    diffusion modelconditioned on extrapolated points.
+    diffusion model conditioned on extrapolated points.
 
     Args:
         config (TaskConfig): Sampling parameters and settings.
-        d_best (np.ndarray): Best objective values for conditioning.
+        cond_points (np.ndarray): Best objective values for conditioning.
         diffusion: Diffusion model with a sample method.
 
     Returns:
-        Tuple[np.ndarray, np.ndarray]:
-            Generated samples and predicted targets.
+        Tuple[List[np.ndarray], List[np.ndarray]]:
+            Generated samples and predicted targets per guidance scale
 
     Raises:
         ValueError:
             If num_pareto_solutions is not divisible by conditioning points.
     """
-    # assert config.sampling_method in ("uniform-ideal", "uniform-direction", )
-
-    if config.sampling_method == "uniform-ideal":
-        cond_points = sample_uniform_toward_ideal(
-            d_best=d_best, k=config.num_cond_points
-        )
-    elif config.sampling_method == "uniform-direction":
-        cond_points = sample_uniform_direction(
-            d_best=d_best, k=config.num_cond_points, alpha=0.4
-        )
-    elif config.sampling_method == "reference-direction":
-        cond_points = sample_along_ref_dirs(
+    # Use the reference directions for conditioning points
+    cond_points = sample_along_ref_dirs(
             d_best=d_best,
             k=config.num_cond_points,
             num_points=config.num_pareto_solutions,
-            noise_scale=config.sampling_noise_scale
-        )
-    else:
-        assert False, config.sampling_method
-
+            noise_scale=config.sampling_noise_scale,
+            seed=config.seed,
+    )
     cond_points_tensor = torch.from_numpy(cond_points).float()
 
     if config.num_pareto_solutions % cond_points_tensor.shape[0] != 0:
@@ -281,258 +247,148 @@ def sampling(
         )
 
     if cond_points_tensor.shape[0] != config.num_pareto_solutions:
-        batch_interleave = config.num_pareto_solutions // cond_points_tensor.shape[0]
+        batch_interleave = (
+            config.num_pareto_solutions // cond_points_tensor.shape[0]
+        )
         cond_points_tensor = cond_points_tensor.repeat_interleave(
             batch_interleave, dim=0
         )
 
-    print(
-        f"Sampling for {cond_points_tensor.shape[0]} solutions! "
-        f"with {cond_points_tensor.shape=} and scale {guidance_scale:.2f}"
-    )
+    res_x_all, res_y_all = [], []
 
-    res_x = diffusion.sample(
-        batch_size=cond_points_tensor.shape[0],
-        cond=cond_points_tensor,
-        guidance_scale=guidance_scale,
-        clamp=False,
-    )
-
-    res_x = res_x.cpu().numpy()
-
-    if config.normalize_xs:
-        task.map_denormalize_x()
-        res_x = task.denormalize_x(res_x)
-
-    if task.is_sequence:
-        res_x = task.to_integers(res_x)
-
-    # Fix issue where some MONAS benchmarks will fail the conversion, so
-    # run the results one by one
-    if config.domain == "monas":
-        res_y = []
-        total_failed = 0
-        for i in range(config.num_pareto_solutions):
-            try:
-                y_i = task.predict(res_x[i, :])
-                res_y.append(y_i)
-            except Exception:
-                print(f"Failed to convert solution {i}")
-                total_failed += 1
+    for scale in config.guidance_scales:
         print(
-            f"In total {total_failed} / {config.num_pareto_solutions} solutions failed"
+            f"Sampling {cond_points_tensor.shape[0]} solutions "
+            f"with {cond_points_tensor.shape=} and guidance_scale={scale:.2f}"
         )
-        res_y = np.asarray(res_y)
-    else:
+
+        res_x = diffusion_model.sample(
+            batch_size=cond_points_tensor.shape[0],
+            cond=cond_points_tensor,
+            guidance_scale=scale,
+            clamp=False,
+        ).cpu().numpy()
+
+        if config.normalize_xs:
+            res_x = task.denormalize_x(res_x)
+
+        if task.is_discrete:
+            if n_dim is None or n_classes is None:
+                raise ValueError(
+                    "n_dim and n_classes must be provided for discrete tasks."
+                )
+            res_x = res_x.reshape(-1, n_dim, n_classes)
+            res_x = task.to_integers(res_x)
+        elif task.is_sequence:
+            res_x = task.to_integers(res_x)
+
         res_y = task.predict(res_x)
 
-    return res_x, res_y, cond_points
+        # Filter out invalid solutions
+        visible_masks = np.ones(len(res_y))
+        visible_masks[np.where(np.logical_or(np.isinf(res_y), np.isnan(res_y)))[0]] = 0
+        visible_masks[np.where(np.logical_or(np.isinf(res_x), np.isnan(res_x)))[0]] = 0
+        res_x = res_x[np.where(visible_masks == 1)[0]]
+        res_y = res_y[np.where(visible_masks == 1)[0]]
+
+        res_x_all.append(res_x)
+        res_y_all.append(res_y)
+
+    # Concatenate results from all guidance scales
+    # Shape: (num_scales, num_solutions, ...)
+    # res_x_all = np.array(res_x_all)
+    # res_y_all = np.array(res_y_all)
+
+    return res_x_all, res_y_all
 
 
 def evaluation(
     task,
     config,
-    res_y: np.ndarray,
-) -> Dict:
+    res_y_all: List[np.ndarray],
+) -> Dict[float, Dict[str, float]]:
     """
     Evaluate generated samples using various multi-objective metrics.
 
     Args:
         task: Task object with normalization and prediction methods.
         config (TaskConfig): Configuration object.
-        res_y (np.ndarray): Corresponding predicted objectives.
+        res_y_all (np.ndarray): Corresponding predicted objectives.
+            Expected shape: (num_scales, num_solutions, num_objectives)
 
     Returns:
-        Dict[str, float]: Dictionary containing HV metrics:
+        Dict[float, Dict[str, float]]: Dictionary containing HV metrics:
             - hv_d_best: HV of d_best
             - hv_100th: HV of all predicted samples
             - hv_75th: HV of top 75% solutions
             - hv_50th: HV of top 50% solutions
     """
-    res_y_75_percent = get_quantile_solutions(res_y, 0.75)
-    res_y_50_percent = get_quantile_solutions(res_y, 0.50)
-
-    # For calculating hypervolume, we use the min-max normalization
-    res_y = task.normalize_y(res_y, normalization_method="min-max")
-    res_y_50_percent = task.normalize_y(
-        res_y_50_percent, normalization_method="min-max"
-    )
-    res_y_75_percent = task.normalize_y(
-        res_y_75_percent, normalization_method="min-max"
-    )
-
     task_name = config.task_name.lower()
-
-    nadir_point = task.nadir_point
-    nadir_point = task.normalize_y(nadir_point, normalization_method="min-max")
-
-    _, d_best = task.get_N_non_dominated_solutions(N=256, return_x=False, return_y=True)
-    d_best = task.normalize_y(d_best, normalization_method="min-max")
-
-    # Hypervolume (Normalized)
-    d_best_hv = hv(nadir_point, d_best, task_name)
-    hv_value = hv(nadir_point, res_y, task_name)
-    hv_value_50_percentile = hv(nadir_point, res_y_50_percent, task_name)
-    hv_value_75_percentile = hv(nadir_point, res_y_75_percent, task_name)
-
-    # Save the results
-    results = {
-        "hv_d_best": d_best_hv,
-        "hv_100th": hv_value,
-        "hv_75th": hv_value_75_percentile,
-        "hv_50th": hv_value_50_percentile,
-    }
-
-    return results
-
-
-def setup_wandb(config):
-    # now = datetime.datetime.now()
-    # ts = now.strftime("%Y-%m-%dT%H-%M")
-    exclude_list = (
-        "gin_config_files",
-        "gin_params",
-        "use_wandb",
-        "save_dir",
-        "experiment_name",
-    )
-
-    cfg = asdict(
-        config, dict_factory=lambda x: {k: v for (k, v) in x if k not in exclude_list}
-    )
-
-    cfg.update(
-        {
-            "slurm_job_id": get_slurm_job_id(),
-            "slurm_array_task_id": get_slurm_task_id(),
-            "reweight_num_bins": gin.query_parameter(
-                "reweight_multi_objective.num_bins"
-            ),
-            "reweight_k": gin.query_parameter("reweight_multi_objective.k"),
-            "reweight_tau": gin.query_parameter("reweight_multi_objective.tau"),
-            "reweight_normalize_dom_counts": gin.query_parameter(
-                "reweight_multi_objective.normalize_dom_counts"
-            ),
-        }
-    )
-    run_name = f"{config.task_name}-{config.seed}"
-    experiment_name = f"{config.domain}-{config.task_name}-{config.experiment_name}"
-    wandb.init(
-        name=run_name,
-        job_type="train",
-        config=config,
-        group=experiment_name,
-        tags=[config.task_name, config.domain],
-        save_code=False,
-    )
-
-
-def plot_results(d_best, cond_points, res_y, config, save_dir):
-    print(f"D-best: {d_best.shape}")
-
-    y_color = COLORS["purple"]
-    d_best_color = COLORS["blue"]
-    cond_point_color = COLORS["orange"]
-
-    if d_best.shape[1] == 3:
-        fig = plt.figure(figsize=(10, 8))
-        ax = fig.add_subplot(111, projection="3d")
-
-        ax.scatter(
-            d_best[:, 0],
-            d_best[:, 1],
-            d_best[:, 2],
-            color=d_best_color,
-            label="d-best",
-        )
-        ax.scatter(
-            cond_points[:, 0],
-            cond_points[:, 1],
-            cond_points[:, 2],
-            color=cond_point_color,
-            label="cond-points",
-        )
-
-        ax.scatter(
-            res_y[:, 0],
-            res_y[:, 1],
-            res_y[:, 2],
-            color=y_color,
-            label="y",
-        )
-        ax.legend(fontsize="large")
-        ax.grid(True, alpha=0.25)
-        ax.set_title(config.task_name, fontsize="x-large")
-    elif d_best.shape[1] == 2:
-        fig, ax = plt.subplots(1, 1, figsize=(10, 8))
-        ax.scatter(
-            d_best[:, 0],
-            d_best[:, 1],
-            color=d_best_color,
-            label="d-best",
-        )
-        ax.scatter(
-            cond_points[:, 0],
-            cond_points[:, 1],
-            color=cond_point_color,
-            label="cond-points",
-        )
-
-        ax.scatter(
-            res_y[:, 0],
-            res_y[:, 1],
-            color=y_color,
-            label="y",
-        )
-        ax.legend(fontsize="large")
-        ax.grid(True, alpha=0.25)
-        ax.set_title(config.task_name, fontsize="x-large")
-
+    if task_name in ALLTASKSDICT:
+        task_name = ALLTASKSDICT[task_name]
     else:
-        fig, axs = plt.subplots(
-            d_best.shape[1], d_best.shape[1], figsize=(20, 20), constrained_layout=True
+        raise ValueError(
+            f"Task '{config.task_name}' not found in ALLTASKSDICT. "
+            f"Available tasks: {list(ALLTASKSDICT.keys())}"
         )
-        fig.suptitle(config.task_name)
 
-        for i in range(d_best.shape[1]):
-            for j in range(d_best.shape[1]):
-                if i == j:
-                    continue
-                axs[i, j].scatter(
-                    d_best[:, i], d_best[:, j], color=d_best_color, label="d_best"
-                )
-                axs[i, j].scatter(
-                    cond_points[:, i],
-                    cond_points[:, j],
-                    color=cond_point_color,
-                    label="cond-points",
-                )
-                axs[i, j].scatter(
-                    res_y[:, i],
-                    res_y[:, j],
-                    color=y_color,
-                    label="y",
-                )
-                axs[i, j].grid(True, alpha=0.25)
-                axs[i, j].set_title(f"Obj {i + 1} vs {j + 1}")
-                axs[i, j].legend(fontsize="large")
-        fig.subplots_adjust(wspace=0.4, hspace=0.4)
+    # Get top 256 Pareto solutions (d_best) & nadir point
+    _, d_best = task.get_N_non_dominated_solutions(
+        N=256,
+        return_x=False,
+        return_y=True
+    )
+    nadir_point = task.nadir_point
 
-    fig.savefig(save_dir / "pareto_front.png", dpi=400, bbox_inches="tight")
-    fig.savefig(save_dir / "pareto_front.svg", transparent=True, bbox_inches="tight")
+    # For evaluation, we use the min-max normalization explicitly
+    d_best = task.normalize_y(d_best, normalization_method="min-max")
+    nadir_point = task.normalize_y(nadir_point, normalization_method="min-max")
+    nadir_point = nadir_point.reshape(-1, )  # Ensure 1D array
+    hv_d_best = hv(nadir_point, d_best, task_name)
+
+    results_per_scale = {}
+    for scale, res_y in zip(config.guidance_scales, res_y_all):
+        res_y_norm = task.normalize_y(res_y, normalization_method="min-max")
+        res_y_75_norm = get_quantile_solutions(res_y_norm, 0.75)
+        res_y_50_norm = get_quantile_solutions(res_y_norm, 0.50)
+
+        results_per_scale[scale] = {
+            "hv_d_best": hv_d_best,
+            "hv_100th": hv(nadir_point, res_y_norm, task_name),
+            "hv_75th": hv(nadir_point, res_y_75_norm, task_name),
+            "hv_50th": hv(nadir_point, res_y_50_norm, task_name),
+        }
+
+    return results_per_scale
 
 
 def print_results(results, config):
-    print("-" * 40)
+    print("-" * 60)
     print(f"Task: {config.task_name.upper()}")
-    print(f"{'Metric':<25} {'Value':>10}")
-    print("-" * 40)
-    print(f"{'Hypervolume (D(best))':<25} {results['hv_d_best']:10.4f}")
-    print(f"{'Hypervolume (100th)':<25} {results['hv_100th']:10.4f}")
-    print(f"{'Hypervolume (75th)':<25} {results['hv_75th']:10.4f}")
-    print(f"{'Hypervolume (50th)':<25} {results['hv_50th']:10.4f}")
-    print("-" * 40)
+    print(f"{'Guidance Scale':<15} {'HV D(best)':>10} {'HV 100th':>10} {'HV 75th':>10} {'HV 50th':>10}")
+    print("-" * 60)
+
+    for scale, metrics in results.items():
+        print(f"{scale:<15.2f} {metrics['hv_d_best']:10.4f} {metrics['hv_100th']:10.4f} "
+              f"{metrics['hv_75th']:10.4f} {metrics['hv_50th']:10.4f}")
+
+    print("-" * 60)
     print("Note: Higher HV = better diversity & convergence")
+
+
+def make_json_serializable(obj):
+    if isinstance(obj, pathlib.Path):
+        return str(obj)
+    elif isinstance(obj, (np.integer, np.floating)):
+        return obj.item()
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {k: make_json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [make_json_serializable(v) for v in obj]
+    else:
+        return obj
 
 
 def main():
@@ -543,30 +399,46 @@ def main():
     pprint(asdict(config))
     print()
 
-    # Setup configuration
-    gin.parse_config_files_and_bindings(config.gin_config_files, config.gin_params)
-
     if config.use_wandb:
         setup_wandb(config)
 
-    task, X, y, d_best = create_task(config)
+    # Modify this as you wish!
+    suffix = f"seed_{config.seed}_reweight_{config.reweight_loss}"
 
-    trainer = train_diffusion(config, X, y)
-    ema_model = trainer.ema.ema_model
+    if config.model_dir is not None:
+        config.model_dir = config.model_dir / f"{config.task_name}_{suffix}"
+        config.model_dir.mkdir(parents=True, exist_ok=True)
 
-    # Sample the model with different guidance scales
-    res_x, res_y, cond_points = sampling(
-        task, config, ema_model, guidance_scale=config.guidance_scale, d_best=d_best
+    # Create and prepare the task dataset
+    (
+        task,
+        X,
+        y,
+        d_best,
+        n_dim,
+        n_classes,
+    ) = create_task(config)
+
+    # Load model config from gin files
+    gin.parse_config_files_and_bindings(
+        config.gin_config_files,
+        config.gin_params
     )
-    results = evaluation(task, config, res_y)
-    # results["guidance_scale"] = scale
-    results = {key: float(val) for key, val in results.items()}
 
-    if config.use_wandb:
-        wandb.log(results)
+    # Train the diffusion model
+    trainer = train_diffusion(config, X, y)
+    ema_model = trainer.ema.ema_model  # use the EMA model for evaluation
+
+    # Sampling and evaluation with different guidance scales
+    res_x_all, res_y_all = sampling(task, config, ema_model,
+                                    d_best, n_dim, n_classes)
+    results = evaluation(task, config, res_y_all)
 
     print()
     print_results(results, config)
+
+    if config.use_wandb:
+        wandb.log(results)
 
     if config.save_dir is not None:
         # Save the configuration
@@ -581,6 +453,7 @@ def main():
             config,
             dict_factory=lambda x: {k: v for (k, v) in x if k not in exclude_list},
         )
+
         # Query some params to the configuration
         cfg_dct = {
             "train_num_steps": gin.query_parameter("Trainer.train_num_steps"),
@@ -599,38 +472,19 @@ def main():
             **cfg_dct,
         }
 
-        with (config.save_dir / "config.json").open("w") as ofstream:
-            json.dump(cfg_dct, ofstream)
+        # suffix = f"seed_{config.seed}_reweight_{config.reweight_loss}"
 
-        res_y = np.asarray(res_y)
-        res_x = np.asarray(res_x)
-        cond_points = np.asarray(cond_points)
+        with (config.save_dir / f"{config.task_name}_{suffix}_config.json").open("w") as ofstream:
+            json.dump(make_json_serializable(cfg_dct), ofstream, indent=2)
 
-        if config.normalize_ys:
-            plot_y = task.normalize_y(res_y)
-        else:
-            plot_y = res_y
-
-        # Save the results and plot the D-best paretoflow + the actual points
-        plot_results(
-            d_best,
-            cond_points=cond_points,
-            res_y=plot_y,
-            config=config,
-            save_dir=config.save_dir,
-        )
+        with (config.save_dir / f"{config.task_name}_{suffix}_results.json").open("w") as ofstream:
+            json.dump(make_json_serializable(results), ofstream, indent=2)
 
         np.savez(
-            config.save_dir / "data.npz",
-            d_best=d_best,
-            res_y=res_y,
-            res_x=res_x,
-            cond_points=cond_points,
+            config.save_dir / f"{config.task_name}_{suffix}_data.npz",
+            res_x=res_x_all,
+            res_y=res_y_all,
         )
-
-        with (config.save_dir / "results.json").open("w") as ofstream:
-            # Ensure that the results do not contain e.g. numpy objects
-            json.dump(results, ofstream)
 
 
 if __name__ == "__main__":

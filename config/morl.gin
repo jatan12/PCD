@@ -1,5 +1,4 @@
-# Default Residual MLP configuration for MORL
-
+# Default Residual MLP configuration
 construct_diffusion_model.normalizer_type = 'identity'  # alt: 'standard' 'minmax'
 construct_diffusion_model.denoising_network = @ResidualMLPDenoiser
 
@@ -8,36 +7,37 @@ construct_diffusion_model.disable_terminal_norm = False
 
 # Network
 ResidualMLPDenoiser.dim_t = 128
-ResidualMLPDenoiser.mlp_width = 512
-ResidualMLPDenoiser.num_layers = 4
+ResidualMLPDenoiser.mlp_width = 1024
+ResidualMLPDenoiser.num_layers = 6
 ResidualMLPDenoiser.learned_sinusoidal_cond = False
 ResidualMLPDenoiser.random_fourier_features = True
 ResidualMLPDenoiser.learned_sinusoidal_dim = 16
 ResidualMLPDenoiser.activation = 'relu'
-ResidualMLPDenoiser.layer_norm = True
+ResidualMLPDenoiser.layer_norm = False  # Maybe set this to True?
 
 # Duffusion Model
-ElucidatedDiffusion.cond_drop_prob = 0.15  # [0.1–0.2]
-ElucidatedDiffusion.num_sample_steps = 1024  # range: [64–1024]
-ElucidatedDiffusion.sigma_data = 1.0  # usually 0.5 or 1.0
-ElucidatedDiffusion.S_churn = 5
-ElucidatedDiffusion.S_tmin = 0.01
-ElucidatedDiffusion.S_tmax = 20
-ElucidatedDiffusion.S_noise = 1.005
+ElucidatedDiffusion.cond_drop_prob = 0.25
+ElucidatedDiffusion.num_sample_steps = 1024
+ElucidatedDiffusion.sigma_data = 1.0
+ElucidatedDiffusion.S_churn = 80
+ElucidatedDiffusion.S_tmin = 0.05
+ElucidatedDiffusion.S_tmax = 50
+ElucidatedDiffusion.S_noise = 1.003
 
 # Training
-Trainer.train_batch_size = 512
-Trainer.small_batch_size = 256
+Trainer.train_batch_size = 1024
+Trainer.small_batch_size = 512
 Trainer.val_batch_size = 128
 Trainer.train_lr = 3e-4
 Trainer.lr_scheduler = 'cosine'
-Trainer.weight_decay = 1e-3
-Trainer.train_num_steps = 4000
-Trainer.sample_every = 500
+Trainer.weight_decay = 0
+Trainer.train_num_steps = 12_000
+Trainer.save_and_sample_every = 500
+Trainer.early_stopping_patience = 3
+Trainer.early_stopping_threshold = 0.001
 
 # Reweighting
 reweight_multi_objective.num_bins = 30
 reweight_multi_objective.k = 10
 reweight_multi_objective.tau = 0.05
 reweight_multi_objective.normalize_dom_counts = True
-# Sampling

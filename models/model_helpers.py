@@ -1,21 +1,23 @@
-import argparse
-import datetime
 import os
-import pathlib
 import random
+import pathlib
+import argparse
+from dataclasses import asdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import List, Tuple, Optional
 
-import gin
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 import scipy
 import torch
-from pygmo import fast_non_dominated_sorting
+import gin
+import wandb
 
-# from pymoo.algorithms.moo.nsga2 import calc_crowding_distance
-from pymoo.algorithms.moo.nsga3 import calc_niche_count
+from pygmo import fast_non_dominated_sorting
 from pymoo.factory import get_reference_directions
 from pymoo.util.function_loader import load_function
+from pymoo.algorithms.moo.nsga3 import calc_niche_count
 from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
 
 
@@ -24,8 +26,6 @@ class TaskConfig:
     seed: int = 42
     task_name: str = ""
     domain: str = ""
-    sampling_method: Literal["uniform-ideal", "uniform-angle"] = "uniform-ideal"
-    guidance_scale: float = 1.0
     reweight_loss: bool = False
     data_pruning: bool = False
     data_preserved_ratio: float = 0.2
@@ -33,16 +33,19 @@ class TaskConfig:
     normalize_ys: bool = False
     normalize_method_xs: str = "z-score"
     normalize_method_ys: str = "z-score"
-    num_cond_points: int = 32
+    num_cond_points: int = 32  # 1, 2, 4, 8, 16, 32, 64, 128, 256
     sampling_noise_scale: float = 0.05
+    # extrapolation_factor: float = 0.0
     num_pareto_solutions: int = 256
+    guidance_scales: List[float] = field(default_factory=lambda: [1.0, 2.0, 2.5, 5.0, 8.0])
     use_val_split: bool = True
     val_ratio: float = 0.2
-    gin_config_files: List[str] = field(default_factory=list)
-    gin_params: List[str] = field(default_factory=list)
     use_wandb: bool = False
     experiment_name: Optional[str] = None
     save_dir: Optional[pathlib.Path] = None
+    model_dir: Optional[pathlib.Path] = None
+    gin_config_files: List[str] = field(default_factory=list)
+    gin_params: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -58,31 +61,14 @@ class SyntheticConfig(TaskConfig):
 
 
 @dataclass
-class REConfig(TaskConfig):
-    task_name: str = "re21"
-    domain: str = "re"
-    normalize_xs: bool = True
-    normalize_ys: bool = True
-    gin_config_files: List[str] = field(default_factory=lambda: ["./config/re.gin"])
-
-
-@dataclass
 class MORLConfig(TaskConfig):
     task_name: str = "mo_hopper_v2"
     domain: str = "morl"
     normalize_xs: bool = True
     normalize_ys: bool = True
-    gin_config_files: List[str] = field(default_factory=lambda: ["./config/morl.gin"])
-    gin_params: List[str] = field(default_factory=list)
-
-
-@dataclass
-class MONASConfig(TaskConfig):
-    task_name: str = "c10mop1"
-    domain: str = "monas"
-    normalize_xs: bool = False
-    normalize_ys: bool = True
-    gin_config_files: List[str] = field(default_factory=lambda: ["./config/monas.gin"])
+    gin_config_files: List[str] = field(
+        default_factory=lambda: ["./config/morl.gin"]
+    )
     gin_params: List[str] = field(default_factory=list)
 
 
@@ -103,13 +89,37 @@ class ScientificConfig(TaskConfig):
             self.normalize_xs = True
 
 
+@dataclass
+class MONASConfig(TaskConfig):
+    task_name: str = "c10mop1"
+    domain: str = "monas"
+    normalize_xs: bool = False
+    normalize_ys: bool = True
+    gin_config_files: List[str] = field(
+        default_factory=lambda: ["./config/monas.gin"]
+    )
+    gin_params: List[str] = field(default_factory=list)
+
+
+@dataclass
+class REConfig(TaskConfig):
+    task_name: str = "re21"
+    domain: str = "re"
+    normalize_xs: bool = True
+    normalize_ys: bool = True
+    gin_config_files: List[str] = field(
+        default_factory=lambda: ["./config/re.gin"]
+    )
+    gin_params: List[str] = field(default_factory=list)
+
+
 def get_task_config(domain: str):
     domain_to_config = {
         "synthetic": SyntheticConfig,
-        "re": REConfig,
-        "scientific": ScientificConfig,
         "morl": MORLConfig,
+        "scientific": ScientificConfig,
         "monas": MONASConfig,
+        "re": REConfig,
     }
     if domain not in domain_to_config:
         raise ValueError(
@@ -121,7 +131,6 @@ def get_task_config(domain: str):
 
 def parse_args() -> TaskConfig:
     parser = argparse.ArgumentParser(description="Diffusion Model Configs")
-
     parser.add_argument(
         "--seed", type=int, default=1000, help="Random seed (default: %(default)s)"
     )
@@ -132,11 +141,11 @@ def parse_args() -> TaskConfig:
         "--domain",
         type=str,
         required=True,
-        choices=["synthetic", "scientific", "morl", "monas", "re"],
+        choices=["synthetic", "morl", "scientific", "monas", "re"],
         help="Task domain (eg. synthetic, scientific)",
     )
     parser.add_argument(
-        "--reweight-loss",
+        "--reweight_loss",
         action="store_true",
         help="Enable loss reweighting based on dominance number",
     )
@@ -149,14 +158,37 @@ def parse_args() -> TaskConfig:
         default=0.2,
         help=("Fraction of data to preserve when pruning (default: %(default)s)"),
     )
+    # parser.add_argument(
+    #     "--extrapolation-factor",
+    #     type=float,
+    #     default=0.0,
+    #     help="Factor for extrapolating conditioning points (default: %(default)s)",
+    # )
     parser.add_argument(
-        "--sampling-method",
-        type=str,
-        choices=["uniform-ideal", "uniform-direction", "reference-direction"],
-        default="uniform-ideal",
+        "--num_cond_points",
+        type=int,
+        default=32,
+        help="Number of non-dominated solutions to use for conditioning (default: %(default)s)",
     )
-    parser.add_argument("--sampling-guidance-scale", type=float, default=1.0)
-
+    parser.add_argument(
+        "--sampling_noise_scale",
+        type=float,
+        default=0.05,
+        help="Sampling noise for conditional points (default: %(default)s)"
+    )
+    parser.add_argument(
+        "--num_pareto_solutions",
+        type=int,
+        default=256,
+        help="Number of Pareto solutions to generate during sampling (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--guidance_scales",
+        type=float,
+        nargs="+",
+        default=[1.0, 2.0, 2.5, 5.0, 8.0],
+        help="Guidance scales for diffusion sampling",
+    )
     parser.add_argument(
         "--use_wandb", action="store_true", help="Enables logging to Weights and biases"
     )
@@ -166,44 +198,59 @@ def parse_args() -> TaskConfig:
         default=None,
         help='The name of the experiment. Used only if "--use_wandb" is set',
     )
-    parser.add_argument("-k", "--num-cond-points", type=int, default=32)
-    parser.add_argument("--sampling-noise-scale", type=float, default=0.05)
     parser.add_argument("--save_dir", type=pathlib.Path, default=None)
+    parser.add_argument("--model_dir", type=pathlib.Path, default=None)
     parser.add_argument("--gin_params", nargs="*", default=[])
 
     args = parser.parse_args()
     ConfigClass = get_task_config(args.domain)
 
     # Create the save directory
-    exp_name = "experiment" if args.experiment_name is None else args.experiment_name
+    exp_name = (
+        "experiment"
+        if args.experiment_name is None
+        else args.experiment_name
+    )
 
+    # Determine the save directory path
+    save_dir = None
     if args.save_dir is not None:
         save_dir = (
             args.save_dir / args.domain / args.task_name / exp_name / str(args.seed)
         )
-    else:
-        save_dir = args.save_dir  # args.save_dir is none!
-
-    # Ensure that the directory exists
-    save_dir.mkdir(parents=True, exist_ok=True)
+        # Ensure that the directory exists
+        save_dir.mkdir(parents=True, exist_ok=True)
 
     config = ConfigClass(
         seed=args.seed,
         task_name=args.task_name,
-        sampling_method=args.sampling_method,
-        guidance_scale=args.sampling_guidance_scale,
         reweight_loss=args.reweight_loss,
-        sampling_noise_scale=args.sampling_noise_scale,
-        num_cond_points=args.num_cond_points,
         data_pruning=args.data_pruning,
         data_preserved_ratio=args.data_preserved_ratio,
+        num_cond_points=args.num_cond_points,
+        sampling_noise_scale=args.sampling_noise_scale,
+        # extrapolation_factor=args.extrapolation_factor,
+        num_pareto_solutions=args.num_pareto_solutions,
+        guidance_scales=args.guidance_scales,
         use_wandb=args.use_wandb,
         experiment_name=args.experiment_name,
         gin_params=args.gin_params,
         save_dir=save_dir,
+        model_dir=args.model_dir,
     )
 
     return config
+
+
+def set_seed(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    global now_seed
+    now_seed = seed
 
 
 def get_slurm_job_id():
@@ -220,35 +267,45 @@ def get_slurm_task_id():
     return int(task_id) if task_id is not None else task_id
 
 
-def set_seed(seed: int) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.backends.cudnn.benchmark = False
-    torch.backends.cudnn.deterministic = True
-    global now_seed
-    now_seed = seed
+def setup_wandb(config):
+    # now = datetime.datetime.now()
+    # ts = now.strftime("%Y-%m-%dT%H-%M")
+    exclude_list = (
+        "gin_config_files",
+        "gin_params",
+        "use_wandb",
+        "save_dir",
+        "experiment_name",
+    )
 
+    cfg = asdict(
+        config, dict_factory=lambda x: {k: v for (k, v) in x if k not in exclude_list}
+    )
 
-def get_pareto_front(y):
-    """
-    Estimates the Pareto front using NonDominatedSorting from pymoo.
-
-    Args:
-        y (np.ndarray): Array of shape (n_samples, n_objectives) with
-                        objective values for multi-objective optimization.
-
-    Returns:
-        tuple: (pareto_points, pareto_indices)
-            - pareto_points (np.ndarray): Non-dominated objective vectors.
-            - pareto_indices (np.ndarray): Idx of the non-dominated points in y
-    """
-    nds = (
-        NonDominatedSorting()
-    )  # Use "efficient_non_dominated_sort" for larger datasets
-    front_indices = nds.do(y, only_non_dominated_front=True)
-    return y[front_indices], front_indices
+    cfg.update(
+        {
+            "slurm_job_id": get_slurm_job_id(),
+            "slurm_array_task_id": get_slurm_task_id(),
+            "reweight_num_bins": gin.query_parameter(
+                "reweight_multi_objective.num_bins"
+            ),
+            "reweight_k": gin.query_parameter("reweight_multi_objective.k"),
+            "reweight_tau": gin.query_parameter("reweight_multi_objective.tau"),
+            "reweight_normalize_dom_counts": gin.query_parameter(
+                "reweight_multi_objective.normalize_dom_counts"
+            ),
+        }
+    )
+    run_name = f"{config.task_name}-{config.seed}"
+    experiment_name = f"{config.domain}-{config.task_name}-{config.experiment_name}"
+    wandb.init(
+        name=run_name,
+        job_type="train",
+        config=config,
+        group=experiment_name,
+        tags=[config.task_name, config.domain],
+        save_code=False,
+    )
 
 
 @gin.configurable(denylist=["scores", "maximize"])
@@ -313,6 +370,39 @@ def reweight_multi_objective(
         weights[mask] = n_items / (n_items + k) * np.exp(-dc[mask].mean() / tau)
 
     return weights
+
+
+def extrapolate_cond_points(
+    cond_points: np.ndarray,
+    utopia_point: np.ndarray,
+    extrapolation_factor: float = 0.1,
+) -> np.ndarray:
+    """
+    Extrapolates a set of points towards a given utopia point.
+
+    Args:
+        cond_points (np.ndarray):
+            The non-dominated points to be extrapolated (shape: [N, D]).
+        utopia_point (np.ndarray):
+            The ideal objective vector, e.g., np.min(all_y, axis=0).
+            (shape: [D]).
+        extrapolation_factor (float):
+            The improvement factor (e.g., 0.1 for a 10% push towards the ideal).
+            Defaults to 0.1.
+
+    Returns:
+        np.ndarray: The new, extrapolated target points (shape: [N, D]).
+    """
+    if extrapolation_factor == 0:
+        return cond_points
+
+    # Calculate the direction vector from each point to the utopia point
+    direction_to_utopia = utopia_point - cond_points
+
+    # Apply the extrapolation formula
+    extrapolated_points = cond_points + extrapolation_factor * direction_to_utopia
+
+    return extrapolated_points
 
 
 def _niching(
@@ -459,118 +549,111 @@ def sample_along_ref_dirs(
     )
 
 
-def sample_uniform_direction(
-    d_best: np.ndarray, k: int, alpha: float = 0.4, noise_scale: float = 0.05
-):
-    idx = np.random.choice(len(d_best), size=k, replace=True)
-    base = d_best[idx]
-
-    # TODO: Make the total  number of points configurable
-    # Tile the same points for easier math
-    num_tiles = 256 // k
-    base = np.tile(base, (num_tiles, 1))
-
-    # Sample projection angles from 0 to 180 deg
-    angles = np.random.uniform(size=base.shape[0]) * 0.5 * np.pi
-    # Extrapolation factor
-    x_i = base[:, 0] - np.sin(angles) * alpha
-    y_i = base[:, 1] - np.cos(angles) * alpha
-    return np.stack([x_i, y_i], axis=1)
+palette = sns.color_palette("colorblind")
+COLORS = {
+    "blue": palette[0],
+    "light-orange": palette[1],
+    "green": palette[2],
+    "orange": palette[3],
+    "purple": palette[4],
+    "brown": palette[5],
+    "pink": palette[6],
+    "grey": palette[7],
+    "yellow": palette[8],
+    "light-blue": palette[9],
+}
 
 
-def sample_uniform_toward_ideal(
-    d_best: np.ndarray,
-    k: int,
-    alpha_range: Tuple[float, float] = (0.1, 0.4),
-    noise_scale: float = 0.05,
-) -> np.ndarray:
-    """
-    Uniformly interpolates between d_best points and pareto ideal
-    then adds noise for exploration.
+def plot_results(d_best, cond_points, res_y, config, save_dir):
+    print(f"D-best: {d_best.shape}")
 
-    The ideal is computed as the min of d_best.
-    The nadir is computed as the max of d_best.
+    y_color = COLORS["purple"]
+    d_best_color = COLORS["blue"]
+    cond_point_color = COLORS["orange"]
 
-    Parameters:
-        d_best (np.ndarray): Array of current best solutions (e.g., PF).
-                             Shape (num_points, num_objectives).
+    if d_best.shape[1] == 3:
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection="3d")
 
-        k (int): Number of conditioning points to generate.
+        ax.scatter(
+            d_best[:, 0],
+            d_best[:, 1],
+            d_best[:, 2],
+            color=d_best_color,
+            label="d-best",
+        )
+        ax.scatter(
+            cond_points[:, 0],
+            cond_points[:, 1],
+            cond_points[:, 2],
+            color=cond_point_color,
+            label="cond-points",
+        )
 
-        alpha_range (tuple[float, float]): Tuple specifying (min, max)
-                                           for interpolation scalar.
+        ax.scatter(
+            res_y[:, 0],
+            res_y[:, 1],
+            res_y[:, 2],
+            color=y_color,
+            label="y",
+        )
+        ax.legend(fontsize="large")
+        ax.grid(True, alpha=0.25)
+        ax.set_title(config.task_name, fontsize="x-large")
+    elif d_best.shape[1] == 2:
+        fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+        ax.scatter(
+            d_best[:, 0],
+            d_best[:, 1],
+            color=d_best_color,
+            label="d-best",
+        )
+        ax.scatter(
+            cond_points[:, 0],
+            cond_points[:, 1],
+            color=cond_point_color,
+            label="cond-points",
+        )
 
-        noise_scale (float): Standard deviation of the Gaussian noise to add.
-                             This is a key hyperparameter for exploration.
-    Returns:
-        np.ndarray: Noisy conditioning points,
-                    clipped within the ideal and nadir bounds.
-    """
-    ideal_point = d_best.min(axis=0, keepdims=True)
-    nadir_point = d_best.max(axis=0, keepdims=True)
+        ax.scatter(
+            res_y[:, 0],
+            res_y[:, 1],
+            color=y_color,
+            label="y",
+        )
+        ax.legend(fontsize="large")
+        ax.grid(True, alpha=0.25)
+        ax.set_title(config.task_name, fontsize="x-large")
 
-    idx = np.random.choice(len(d_best), size=k, replace=True)
-    base = d_best[idx]
+    else:
+        fig, axs = plt.subplots(
+            d_best.shape[1], d_best.shape[1], figsize=(20, 20), constrained_layout=True
+        )
+        fig.suptitle(config.task_name)
 
-    min_alpha, max_alpha = alpha_range
-    alphas = np.random.uniform(min_alpha, max_alpha, size=(k, 1))
+        for i in range(d_best.shape[1]):
+            for j in range(d_best.shape[1]):
+                if i == j:
+                    continue
+                axs[i, j].scatter(
+                    d_best[:, i], d_best[:, j], color=d_best_color, label="d_best"
+                )
+                axs[i, j].scatter(
+                    cond_points[:, i],
+                    cond_points[:, j],
+                    color=cond_point_color,
+                    label="cond-points",
+                )
+                axs[i, j].scatter(
+                    res_y[:, i],
+                    res_y[:, j],
+                    color=y_color,
+                    label="y",
+                )
+                axs[i, j].grid(True, alpha=0.25)
+                axs[i, j].set_title(f"Obj {i + 1} vs {j + 1}")
+                axs[i, j].legend(fontsize="large")
+        fig.subplots_adjust(wspace=0.4, hspace=0.4)
 
-    directions = ideal_point - base  # minimization direction
-    cond_points = base + alphas * directions
-
-    noise = np.random.normal(loc=0.0, scale=noise_scale, size=cond_points.shape)
-    noisy_points = cond_points + noise
-
-    return np.clip(noisy_points, a_min=ideal_point, a_max=nadir_point)
-
-
-# TODO: This is deprecated, remove it
-# def sample_along_reference_vectors(
-#     d_best: np.ndarray,
-#     k: int,
-#     seed: int = 42,
-#     method: str = "energy",
-#     alpha_range: Tuple[float, float] = (0.1, 0.3),
-#     bounds: Tuple[float, float] = (0.0, 1.0),
-# ) -> np.ndarray:
-#     """
-#     Sample k points by moving inward from a normalized Pareto front
-#     along reference directions.
-#
-#     Args:
-#         d_best (np.ndarray): Normalized Pareto front, shape (N, M).
-#         k (int): Number of points to sample.
-#         seed (int): Random seed.
-#         method (str): Reference direction generation method.
-#         alpha_range (tuple): Range for step sizes toward the ideal point.
-#         bounds (tuple): Clipping bounds for sampled points.
-#
-#     Returns:
-#         np.ndarray: Sampled points of shape (k, M).
-#     """
-#     np.random.seed(seed)
-#     n_obj = d_best.shape[1]
-#
-#     # Generate reference directions (assumed normalized)
-#     ref_dirs = get_reference_directions(method, n_obj, k, seed=seed)
-#
-#     # Compute crowding distances and sanitize them
-#     crowding_dist = calc_crowding_distance(d_best)
-#     finite_max = np.nanmax(crowding_dist[np.isfinite(crowding_dist)])
-#     crowding_dist = np.where(np.isinf(crowding_dist), finite_max * 10, crowding_dist)
-#     crowding_dist = np.nan_to_num(crowding_dist, nan=0.0)
-#
-#     # Normalize to get sampling probabilities or fallback to uniform
-#     total_dist = np.sum(crowding_dist)
-#     prob = crowding_dist / total_dist if total_dist > 0 else None
-#
-#     # Sample base points from d_best weighted by crowding distance
-#     idx = np.random.choice(len(d_best), size=k, replace=True, p=prob)
-#     base_points = d_best[idx]
-#
-#     # Sample step sizes and move inward along reference directions
-#     alphas = np.random.uniform(*alpha_range, size=(k, 1))
-#     sampled_points = base_points - alphas * ref_dirs
-#
-#     # Clip points within bounds
-#     return np.clip(sampled_points, bounds[0], bounds[1])
+    fig.savefig(save_dir / "pareto_front.png", dpi=400, bbox_inches="tight")
+    fig.savefig(save_dir / "pareto_front.svg", transparent=True, bbox_inches="tight")
