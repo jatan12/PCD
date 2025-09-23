@@ -253,8 +253,9 @@ def sampling(
             If num_pareto_solutions is not divisible by conditioning points.
     """
     # assert config.sampling_method in ("uniform-ideal", "uniform-direction", )
-
-    if config.sampling_method == "uniform-ideal":
+    if config.sampling_method == "d-best":
+        cond_points = d_best
+    elif config.sampling_method == "uniform-ideal":
         cond_points = sample_uniform_toward_ideal(
             d_best=d_best, k=config.num_cond_points
         )

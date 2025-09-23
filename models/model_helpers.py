@@ -152,7 +152,7 @@ def parse_args() -> TaskConfig:
     parser.add_argument(
         "--sampling-method",
         type=str,
-        choices=["uniform-ideal", "uniform-direction", "reference-direction"],
+        choices=["d-best", "uniform-ideal", "uniform-direction", "reference-direction"],
         default="uniform-ideal",
     )
     parser.add_argument("--sampling-guidance-scale", type=float, default=1.0)
