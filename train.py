@@ -267,6 +267,7 @@ def sampling(
         cond_points = sample_along_ref_dirs(
             d_best=d_best,
             k=config.num_cond_points,
+            ref_dir_method=config.ref_dir_method,
             num_points=config.num_pareto_solutions,
             noise_scale=config.sampling_noise_scale
         )

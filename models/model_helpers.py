@@ -25,6 +25,7 @@ class TaskConfig:
     task_name: str = ""
     domain: str = ""
     sampling_method: Literal["uniform-ideal", "uniform-angle"] = "uniform-ideal"
+    ref_dir_method: Literal["das-dennis", "energy"] = "energy"
     guidance_scale: float = 1.0
     reweight_loss: bool = False
     data_pruning: bool = False
@@ -156,6 +157,12 @@ def parse_args() -> TaskConfig:
         default="uniform-ideal",
     )
     parser.add_argument("--sampling-guidance-scale", type=float, default=1.0)
+    parser.add_argument(
+        "--sampling-ref-dir-method",
+        type=str,
+        choices=["energy", "das-dennis"],
+        default="energy",
+    )
 
     parser.add_argument(
         "--use_wandb", action="store_true", help="Enables logging to Weights and biases"
@@ -192,6 +199,7 @@ def parse_args() -> TaskConfig:
         task_name=args.task_name,
         sampling_method=args.sampling_method,
         guidance_scale=args.sampling_guidance_scale,
+        ref_dir_method=args.sampling_ref_dir_method,
         reweight_loss=args.reweight_loss,
         sampling_noise_scale=args.sampling_noise_scale,
         num_cond_points=args.num_cond_points,
@@ -379,9 +387,15 @@ def sample_along_ref_dirs(
     num_points: int,
     alpha_range: Tuple[float, float] = (0.1, 0.4),
     noise_scale: float = 0.05,
+    ref_dir_method: Literal["energy", "das-dennis"] = "energy",
     seed: int = 42,
 ) -> np.ndarray:
-    ref_dirs = get_reference_directions("energy", d_best.shape[1], k, seed=seed)
+    if ref_dir_method == "energy":
+        ref_dirs = get_reference_directions("energy", d_best.shape[1], k, seed=seed)
+    elif ref_dir_method == "das-dennis":
+        ref_dirs = get_reference_directions(
+            "uniform", d_best.shape[1], n_partitions=k
+        )
     d_best = d_best.astype(np.float64)
     fronts, rank = NonDominatedSorting().do(
         d_best, return_rank=True, n_stop_if_ranked=k
@@ -415,9 +429,9 @@ def sample_along_ref_dirs(
 
         current_front = fronts[front_index]
         if front_index == 1:
-            prev_fronts = fronts[:front_index-1]
+            prev_fronts = fronts[: front_index - 1]
         else:
-            prev_fronts = np.concatenate(fronts[:front_index-1])
+            prev_fronts = np.concatenate(fronts[: front_index - 1])
 
         front_index += 1
         # We will always use all points from previous fronts
