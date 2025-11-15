@@ -154,6 +154,7 @@ ALG_NAMES = {
     "pc-diffusion-pruning-ref-dir": "PCDiffusion w Pruning (ref-dir)",
     "pc-diffusion-reweight": "PCDiffusion w reweight (ours)",
     "pc-diffusion-reweight-ref-dir": "PCDiffusion (ours)",
+    "pc-diffusion-reweight-ref-dir-high-tau": "PCDiffusion (ours)",
 }
 
 
@@ -247,6 +248,8 @@ def variant_to_method(variant):
             return "pc-diffusion-pruning-ref-dir"
         case "reweight-ref-dir":
             return "pc-diffusion-reweight-ref-dir"
+        case "reweight-ref-dir-high-tau":
+            return "pc-diffusion-reweight-ref-dir-high-tau"
         case "prune" | "pruning":
             return "pc-diffusion-pruning"
         case "reweight":
@@ -455,33 +458,34 @@ def load_moddom(data_dir: pathlib.Path, variants: str):
                     options.append((fp, when))
 
         if len(options) < 1:
-            raise ValueError(
-                f"No directories for {variant!r} in {task_dir!s} ({list(task_dir.iterdir())})"
+            print(
+                f"WARNING: No directories for {variant!r} in {task_dir!s} ({list(task_dir.iterdir())})"
             )
+            return None
 
         # Find the newest option
         options = sorted(options, key=lambda x: x[1])
         return options[-1][0].name
 
-    def variant_to_method(variant):
-        match variant:
-            case "baseline":
-                return "pc-diffusion"
-            case "baseline-ref-dir":
-                return "pc-diffusion-ref-dir"
-            case "baseline-ref-dir-no-noise":
-                return "pc-diffusion-ref-dir-no-noise"
-            case "pruning-ref-dir":
-                return "pc-diffusion-pruning-ref-dir"
-            case "reweight-ref-dir":
-                return "pc-diffusion-reweight-ref-dir"
-            case "prune" | "pruning":
-                return "pc-diffusion-pruning"
-            case "reweight":
-                return "pc-diffusion-reweight"
-            case _:
-                assert False, variant
-
+    # def variant_to_method(variant):
+    #     match variant:
+    #         case "baseline":
+    #             return "pc-diffusion"
+    #         case "baseline-ref-dir":
+    #             return "pc-diffusion-ref-dir"
+    #         case "baseline-ref-dir-no-noise":
+    #             return "pc-diffusion-ref-dir-no-noise"
+    #         case "pruning-ref-dir":
+    #             return "pc-diffusion-pruning-ref-dir"
+    #         case "reweight-ref-dir":
+    #             return "pc-diffusion-reweight-ref-dir"
+    #         case "prune" | "pruning":
+    #             return "pc-diffusion-pruning"
+    #         case "reweight":
+    #             return "pc-diffusion-reweight"
+    #         case _:
+    #             assert False, variant
+    #
     def load_json(filepath):
         with filepath.open("r") as ifstream:
             payload = json.load(ifstream)
@@ -503,6 +507,13 @@ def load_moddom(data_dir: pathlib.Path, variants: str):
                         continue
 
                 method = variant_to_method(variant)
+
+                if dirname is None:
+                    print(
+                        f"WARNING: Missing variant {variant} for task "
+                        f"{task}! Continuing..."
+                    )
+                    continue
 
                 print(f"<<< Variant {variant!r} = {method!r} >>>")
                 if not (task_dir / dirname).is_dir():
@@ -839,6 +850,9 @@ def compute_tables(args):
         case "create-ablation-df":
             moddom_results = load_moddom(args.input_dir, variants=args.moddom_variant)
             moddom_results.to_parquet(args.output_path)
+        case "create-main-df":
+            df = load_all(args.input_dir, args.moddom_variant)
+
         case "create-main-table":
             df = load_all(args.input_dir, args.moddom_variant)
             # Remove tasks where re is zero for baselines

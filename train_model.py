@@ -267,7 +267,6 @@ def sampling(
         cond_points = sample_along_ref_dirs(
             d_best=d_best,
             k=config.num_cond_points,
-            ref_dir_method=config.ref_dir_method,
             num_points=config.num_pareto_solutions,
             noise_scale=config.sampling_noise_scale
         )
@@ -554,21 +553,20 @@ def main():
     task, X, y, d_best = create_task(config)
 
     trainer = train_diffusion(config, X, y)
-    ema_model = trainer.ema.ema_model
-
-    # Sample the model with different guidance scales
-    res_x, res_y, cond_points = sampling(
-        task, config, ema_model, guidance_scale=config.guidance_scale, d_best=d_best
-    )
-    results = evaluation(task, config, res_y)
-    # results["guidance_scale"] = scale
-    results = {key: float(val) for key, val in results.items()}
-
-    if config.use_wandb:
-        wandb.log(results)
-
-    print()
-    print_results(results, config)
+    # ema_model = trainer.ema.ema_model
+    # # Sample the model with different guidance scales
+    # res_x, res_y, cond_points = sampling(
+    #     task, config, ema_model, guidance_scale=config.guidance_scale, d_best=d_best
+    # )
+    # results = evaluation(task, config, res_y)
+    # # results["guidance_scale"] = scale
+    # results = {key: float(val) for key, val in results.items()}
+    #
+    # if config.use_wandb:
+    #     wandb.log(results)
+    #
+    # print()
+    # print_results(results, config)
 
     if config.save_dir is not None:
         # Save the configuration
@@ -603,37 +601,6 @@ def main():
 
         with (config.save_dir / "config.json").open("w") as ofstream:
             json.dump(cfg_dct, ofstream)
-
-        res_y = np.asarray(res_y)
-        res_x = np.asarray(res_x)
-        cond_points = np.asarray(cond_points)
-
-        if config.normalize_ys:
-            plot_y = task.normalize_y(res_y)
-        else:
-            plot_y = res_y
-
-        # Save the results and plot the D-best paretoflow + the actual points
-        plot_results(
-            d_best,
-            cond_points=cond_points,
-            res_y=plot_y,
-            config=config,
-            save_dir=config.save_dir,
-        )
-
-        np.savez(
-            config.save_dir / "data.npz",
-            d_best=d_best,
-            res_y=res_y,
-            res_x=res_x,
-            cond_points=cond_points,
-        )
-
-        with (config.save_dir / "results.json").open("w") as ofstream:
-            # Ensure that the results do not contain e.g. numpy objects
-            json.dump(results, ofstream)
-
 
 if __name__ == "__main__":
     main()
