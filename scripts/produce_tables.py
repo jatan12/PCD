@@ -212,6 +212,7 @@ TASK_RENAMES = {
     "rfp": "RFP",
 }
 
+
 def standardize_task_name(task_name):
     match task_name:
         case "mohopperv2":
@@ -453,9 +454,10 @@ def load_moddom(data_dir: pathlib.Path, variants: str):
                     when = datetime.datetime.strptime(parts[-1], "%Y-%m-%d")
                     options.append((fp, when))
 
-        assert len(options) > 0, (
-            f"No directories for {variant!r} in {task_dir!s} ({list(task_dir.iterdir())})"
-        )
+        if len(options) < 1:
+            raise ValueError(
+                f"No directories for {variant!r} in {task_dir!s} ({list(task_dir.iterdir())})"
+            )
 
         # Find the newest option
         options = sorted(options, key=lambda x: x[1])
@@ -493,7 +495,12 @@ def load_moddom(data_dir: pathlib.Path, variants: str):
             task = task_dir.name
 
             for variant in variants:
-                dirname = variant_to_directory(task_dir, variant)
+                try:
+                    dirname = variant_to_directory(task_dir, variant)
+                except Exception:
+                    if domain == "scientific":
+                        print(f"Could not find {variant} for task={task}. Continuing..")
+                        continue
 
                 method = variant_to_method(variant)
 
@@ -508,7 +515,6 @@ def load_moddom(data_dir: pathlib.Path, variants: str):
                 print(f"<<< Directory {(task_dir / dirname)!s} >>>")
                 # Go through every seed
                 for result_dir in (task_dir / dirname).iterdir():
-                    print(result_dir)
                     seed = int(result_dir.name)
 
                     if not (result_dir / "results.json").is_file():
@@ -590,11 +596,9 @@ def get_per_task_hvs(df, tasks, hv_values="hv_100th"):
 
 
 def compute_per_task_hvs(df: pd.DataFrame, output_dir: pathlib.Path, percentile: str):
-
-
-    # Task groups: 
+    # Task groups:
     TASK_GROUPS = {
-      "re-1": [
+        "re-1": [
             "re21",
             "re22",
             "re23",
@@ -622,7 +626,6 @@ def compute_per_task_hvs(df: pd.DataFrame, output_dir: pathlib.Path, percentile:
             "zdt4",
             "zdt6",
         ],
-
         "synthetic-2": [
             "dtlz1",
             "dtlz7",
@@ -653,24 +656,26 @@ def compute_per_task_hvs(df: pd.DataFrame, output_dir: pathlib.Path, percentile:
             "in1kmop7",
             "in1kmop8",
             "in1kmop9",
-        ]
+        ],
     }
-
 
     df.loc[:, "domain"] = df.task.map(TASK_TO_DOMAIN)
     all_domains = list(set(TASK_TO_DOMAIN.values()))
     for key, task_set in TASK_GROUPS.items():
-        if  key != "scientific":
+        if key != "scientific":
             continue
         print(f"Staring {key!r}")
         hv_df = get_per_task_hvs(df, task_set, hv_values=percentile)
         s = hv_df.style.apply(highlight_max_mean, props="textbf:--rwrap").apply(
-                highlight_second_highest_mean, props="underline:--rwrap;"
-            )
+            highlight_second_highest_mean, props="underline:--rwrap;"
+        )
         column_format = "l" + "c" * len(hv_df.columns)
-        s.to_latex(output_dir / f"{key}_{percentile}.tex", hrules=True, column_format=column_format)
+        s.to_latex(
+            output_dir / f"{key}_{percentile}.tex",
+            hrules=True,
+            column_format=column_format,
+        )
         print(f"{key!r} done!")
-
 
 
 def compute_avg_rank_tables(
@@ -774,7 +779,7 @@ def highlight_second_lowest_mean(s, props):
 
 def highlight_second_highest_mean(s, props):
     indexes = np.arange(s.shape[0])
-    #mu = np.asarray([float(val.split("$")[0]) for val in s.values])
+    # mu = np.asarray([float(val.split("$")[0]) for val in s.values])
     mu = []
     for val in s.values:
         if isinstance(val, float):
@@ -795,8 +800,8 @@ def highlight_min_mean(s, props):
         else:
             mu.append(float(val.split("$")[0]))
     mu = np.asarray(mu)
-    #print(s.values)
-    #mu = np.asarray([float(val.split("$")[0]) for val in s.values])
+    # print(s.values)
+    # mu = np.asarray([float(val.split("$")[0]) for val in s.values])
     return np.where(indexes == np.nanargmin(mu), props, "")
 
 
@@ -810,8 +815,9 @@ def highlight_max_mean(s, props):
         else:
             mu.append(float(val.split("$")[0]))
     mu = np.asarray(mu)
-    #mu = np.asarray([float(val.split("$")[0]) for val in s.values])
+    # mu = np.asarray([float(val.split("$")[0]) for val in s.values])
     return np.where(indexes == np.nanargmax(mu), props, "")
+
 
 def load_all(input_dir, variants):
     moddom_results = load_moddom(input_dir, variants)
@@ -824,8 +830,8 @@ def load_all(input_dir, variants):
     print(f"ParetoFlow contains {paretoflow_results.shape[0]} rows!")
     return pd.concat((baselines, paretoflow_results, moddom_results))
 
-def compute_tables(args):
 
+def compute_tables(args):
     match args.action:
         case "create-guidance-df":
             guidance_results = load_moddom_guidance_scales(args.input_dir)
@@ -840,9 +846,9 @@ def compute_tables(args):
             df = df.loc[mask, :]
 
             rank_table = compute_avg_rank_tables(df, args.rank_precision)
-            s = rank_table.style.apply(highlight_min_mean, props="textbf:--rwrap").apply(
-                highlight_second_lowest_mean, props="underline:--rwrap;"
-            )
+            s = rank_table.style.apply(
+                highlight_min_mean, props="textbf:--rwrap"
+            ).apply(highlight_second_lowest_mean, props="underline:--rwrap;")
             column_format = "l" + "c" * len(rank_table.columns)
             s.to_latex(args.output_path, hrules=True, column_format=column_format)
         case "create-hv-tables":
@@ -873,9 +879,8 @@ def compute_tables(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("input_dir", type=pathlib.Path)
     parser.add_argument(
-        "--action",
+        "action",
         type=str,
         choices=[
             "create-guidance-df",
@@ -884,10 +889,13 @@ if __name__ == "__main__":
             "create-main-table",
             "create-hv-tables",
         ],
-        default="create-main-table"
+        default="create-main-table",
     )
+    parser.add_argument("--input_dir", type=pathlib.Path, required=True)
     parser.add_argument("--rank_precision", type=int, default=None)
-    parser.add_argument("--hv_percentile", type=str, choices=["hv_100th", "hv_75th", "hv_50th"])
+    parser.add_argument(
+        "--hv_percentile", type=str, choices=["hv_100th", "hv_75th", "hv_50th"]
+    )
     parser.add_argument("--output_path", required=True, type=pathlib.Path, default=None)
     # parser.add_argument("--save_df", action="store_true")
     # parser.add_argument("--save_table", action="store_true")
