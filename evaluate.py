@@ -270,8 +270,6 @@ def setup_wandb(config):
         save_code=False,
     )
 
-def load_pretrained_model(model_path: pathlib.Path, device: str = "cuda:0"):
-    data = torch.load(model_path, map_location=device)
 
 
 
@@ -303,8 +301,8 @@ def main():
         setup_wandb(config)
 
     task, X, y, d_best = create_task(config)
-
-    trainer = load_pretrained_model(config, X, y)
+    
+    diffusion_utils.load_pretrained_model(config.filepath, X)
     ema_model = trainer.ema.ema_model
 
     res_x, res_y = sampling(task, config, ema_model, d_best)

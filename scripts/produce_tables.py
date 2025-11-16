@@ -155,6 +155,18 @@ ALG_NAMES = {
     "pc-diffusion-reweight": "PCDiffusion w reweight (ours)",
     "pc-diffusion-reweight-ref-dir": "PCDiffusion (ours)",
     "pc-diffusion-reweight-ref-dir-high-tau": "PCDiffusion (ours)",
+    "pcd-ode-sampling": "PCD w ODE-sampling",
+    "pcd-reweight-ode-sampling": "PCD w ODE-sampling & Reweighting",
+    "reweight_num_points_4": "K=4",
+    "reweight_num_points_8": "K=8",
+    "reweight_num_points_16": "K=16",
+    "reweight_num_points_64": "K=64",
+    "reweight_num_denoising_steps_32": "steps 32",
+    "reweight_num_denoising_steps_64": "steps 64",
+    "reweight_num_denoising_steps_128": "steps 128",
+    "reweight_num_denoising_steps_256": "steps 256",
+    "reweight_num_denoising_steps_512": "steps 512",
+    "reweight_num_denoising_steps_1024": "steps 1024",
 }
 
 
@@ -254,6 +266,31 @@ def variant_to_method(variant):
             return "pc-diffusion-pruning"
         case "reweight":
             return "pc-diffusion-reweight"
+        case "deterministic_ode":
+            return "pcd-ode-sampling"
+        case "deterministic_ode_reweight":
+            return "pcd-reweight-ode-sampling"
+
+        case (
+            "reweight_num_denoising_steps_32"
+            | "reweight_num_denoising_steps_64"
+            | "reweight_num_denoising_steps_128"
+            | "reweight_num_denoising_steps_256"
+            | "reweight_num_denoising_steps_512"
+            | "reweight_num_denoising_steps_1024"
+        ):
+            return variant
+        case (
+            "reweight_num_points_4"
+            | "reweight_num_points_8"
+            | "reweight_num_points_16"
+            | "reweight_num_points_64"
+        ):
+            return variant
+        case "reweight-das-dennis":
+            return variant
+        case "d-best" | "reweight-d-best":
+            return variant
         case _:
             assert False, variant
 
@@ -442,7 +479,7 @@ def load_paretoflow(data_dir: pathlib.Path):
     return pd.DataFrame(results)
 
 
-def load_moddom(data_dir: pathlib.Path, variants: str):
+def load_moddom(data_dir: pathlib.Path, variants: str, task_set=None):
     def variant_to_directory(task_dir, variant):
         options = []
         for fp in task_dir.iterdir():
@@ -467,25 +504,6 @@ def load_moddom(data_dir: pathlib.Path, variants: str):
         options = sorted(options, key=lambda x: x[1])
         return options[-1][0].name
 
-    # def variant_to_method(variant):
-    #     match variant:
-    #         case "baseline":
-    #             return "pc-diffusion"
-    #         case "baseline-ref-dir":
-    #             return "pc-diffusion-ref-dir"
-    #         case "baseline-ref-dir-no-noise":
-    #             return "pc-diffusion-ref-dir-no-noise"
-    #         case "pruning-ref-dir":
-    #             return "pc-diffusion-pruning-ref-dir"
-    #         case "reweight-ref-dir":
-    #             return "pc-diffusion-reweight-ref-dir"
-    #         case "prune" | "pruning":
-    #             return "pc-diffusion-pruning"
-    #         case "reweight":
-    #             return "pc-diffusion-reweight"
-    #         case _:
-    #             assert False, variant
-    #
     def load_json(filepath):
         with filepath.open("r") as ifstream:
             payload = json.load(ifstream)
@@ -497,6 +515,10 @@ def load_moddom(data_dir: pathlib.Path, variants: str):
         print(f" ====== Starting domain {domain} ====== ")
         for task_dir in domain_dir.iterdir():
             task = task_dir.name
+
+            if task_set is not None and task not in task_set:
+                print(f"Skipping {task!r}")
+                continue
 
             for variant in variants:
                 try:
@@ -535,10 +557,11 @@ def load_moddom(data_dir: pathlib.Path, variants: str):
                         continue
                     hypervolumes = load_json(result_dir / "results.json")
 
-                    if domain == "scientific":
-                        # In sci-design the results contain guidance scales for each of them,
-                        # so just pick the one with "2.5"
+                    # Detemine the format of th hypervolumes (i.e. single dict or dict of dicts)
+                    _val = next(iter(hypervolumes.values()))
+                    if isinstance(_val, dict):
                         hypervolumes = hypervolumes["2.5"]
+                    del _val
 
                     results.append(
                         {
@@ -553,38 +576,39 @@ def load_moddom(data_dir: pathlib.Path, variants: str):
     return pd.DataFrame(results)
 
 
-def get_per_task_hvs(df, tasks, hv_values="hv_100th"):
+def get_per_task_hvs(df, tasks, hv_values="hv_100th", include_d_best=True):
     mask = df.task.isin(tasks)
     domain_df = df.loc[mask, :]
     domain_df.rename(columns={"name": "method"}, errors="raise", inplace=True)
 
     domain_df.loc[:, "task"] = domain_df.task.map(TASK_RENAMES)
 
-    # Add d-best score for each task
-    d_best_rows = []
-    for (task, seed), task_df in domain_df.groupby(["task", "seed"]):
-        domain = task_df.iloc[0]["domain"]
-        if task.lower() == "vlmop1":
-            d_best = task_df.iloc[0]["hv_d_best"]
-        else:
-            mask = task_df.method == "paretoflow"
-            assert mask.sum() == 1
-            d_best = task_df.loc[mask, "hv_d_best"].iloc[0]
-        d_best_rows.append(
-            {
-                "method": "d_best",
-                "hv_100th": d_best,
-                "hv_75th": d_best,
-                "hv_50th": d_best,
-                "task": task,
-                "seed": seed,
-                "hv_d_best": d_best,
-                "domain": domain,
-            }
-        )
-    d_best_df = pd.DataFrame(d_best_rows)
+    if include_d_best:
+        # Add d-best score for each task
+        d_best_rows = []
+        for (task, seed), task_df in domain_df.groupby(["task", "seed"]):
+            domain = task_df.iloc[0]["domain"]
+            if task.lower() == "vlmop1":
+                d_best = task_df.iloc[0]["hv_d_best"]
+            else:
+                mask = task_df.method == "paretoflow"
+                assert mask.sum() == 1
+                d_best = task_df.loc[mask, "hv_d_best"].iloc[0]
+            d_best_rows.append(
+                {
+                    "method": "d_best",
+                    "hv_100th": d_best,
+                    "hv_75th": d_best,
+                    "hv_50th": d_best,
+                    "task": task,
+                    "seed": seed,
+                    "hv_d_best": d_best,
+                    "domain": domain,
+                }
+            )
+        d_best_df = pd.DataFrame(d_best_rows)
 
-    domain_df = pd.concat((domain_df, d_best_df))
+        domain_df = pd.concat((domain_df, d_best_df))
 
     per_task_hv = (
         domain_df.groupby(["task", "method"], as_index=False)[hv_values]
@@ -604,6 +628,108 @@ def get_per_task_hvs(df, tasks, hv_values="hv_100th"):
 
     print(per_task_hv)
     return per_task_hv
+
+
+def create_num_cond_tables(df: pd.DataFrame, output_dir: pathlib.Path):
+    df.rename(columns={"name": "method"}, errors="raise", inplace=True)
+    df.loc[:, "task"] = df.task.map(TASK_RENAMES)
+
+    per_points_df = (
+        df.groupby(["task", "method"], as_index=False)["hv_100th"]
+        .agg(["mean", "std"])
+        .reset_index(drop=True)
+    )
+    per_points_df.loc[:, "value"] = (
+        per_points_df.loc[:, "mean"].apply(lambda x: f"{x:.2f}")
+        + r"$\pm$"
+        + per_points_df.loc[:, "std"].apply(lambda x: f"{x:.2f}")
+    )
+
+    print(per_points_df)
+    per_task_hv = per_points_df.pivot(index="method", columns="task", values=["value"])
+    per_task_hv = per_task_hv.set_index(
+        per_task_hv.index.map(
+            {
+                "reweight_num_points_4": "K=4",
+                "reweight_num_points_8": "K=8",
+                "reweight_num_points_16": "K=16",
+                "reweight_num_points_64": "K=64",
+                "pf-diffusion-reweight-ref-dir": "K=32",
+            }
+        ),
+        drop=True,
+    )
+
+    print(per_task_hv)
+
+    s = per_task_hv.style.apply(highlight_max_mean, props="textbf:--rwrap").apply(
+        highlight_second_highest_mean, props="underline:--rwrap;"
+    )
+    column_format = "l" + "c" * len(per_task_hv.columns)
+    s.to_latex(
+        output_dir / "cond_points.tex",
+        hrules=True,
+        column_format=column_format,
+    )
+
+
+def create_ref_dir_gen_tables(df: pd.DataFrame, output_dir: pathlib.Path):
+    df.rename(columns={"name": "method"}, errors="raise", inplace=True)
+    df.loc[:, "task"] = df.task.map(TASK_RENAMES)
+
+    # mask = df.method == "pc-diffusion-reweight-ref-dir"
+    # df.loc[mask, "method"] = "Riesz S-Energy"
+
+    per_points_df = (
+        df.groupby(["task", "method"], as_index=False)["hv_100th"]
+        .agg(["mean", "std"])
+        .reset_index(drop=True)
+    )
+    per_points_df.loc[:, "value"] = (
+        per_points_df.loc[:, "mean"].apply(lambda x: f"{x:.2f}")
+        + r"$\pm$"
+        + per_points_df.loc[:, "std"].apply(lambda x: f"{x:.2f}")
+    )
+
+    print(per_points_df)
+    per_task_hv = per_points_df.pivot(index="method", columns="task", values=["value"])
+    per_task_hv = per_task_hv.set_index(
+        per_task_hv.index.map(
+            {
+                "reweight-das-dennis": "Das-Dennis",
+                "pc-diffusion-reweight-ref-dir": "Riesz S-energy",
+            }
+        ),
+        drop=True,
+    )
+
+    print(per_task_hv)
+
+    s = per_task_hv.style.apply(highlight_max_mean, props="textbf:--rwrap").apply(
+        highlight_second_highest_mean, props="underline:--rwrap;"
+    )
+    column_format = "l" + "c" * len(per_task_hv.columns)
+    s.to_latex(
+        output_dir / "ref_dir_gen.tex",
+        hrules=True,
+        column_format=column_format,
+    )
+
+
+def compute_ode_hvs(df: pd.DataFrame, output_dir: pathlib.Path, percentile: str):
+    df.loc[:, "domain"] = df.task.map(TASK_TO_DOMAIN)
+    task_set = df.task.unique().tolist()
+    print(task_set)
+    hv_df = get_per_task_hvs(df, task_set, include_d_best=False)
+    s = hv_df.style.apply(highlight_max_mean, props="textbf:--rwrap").apply(
+        highlight_second_highest_mean, props="underline:--rwrap;"
+    )
+    column_format = "l" + "c" * len(hv_df.columns)
+    s.to_latex(
+        output_dir / f"ode_sampling_{percentile}.tex",
+        hrules=True,
+        column_format=column_format,
+    )
 
 
 def compute_per_task_hvs(df: pd.DataFrame, output_dir: pathlib.Path, percentile: str):
@@ -847,6 +973,57 @@ def compute_tables(args):
         case "create-guidance-df":
             guidance_results = load_moddom_guidance_scales(args.input_dir)
             guidance_results.to_parquet(args.output_path)
+
+        case "create-denoising-steps-df":
+            moddom_results = load_moddom(
+                args.input_dir,
+                variants=[
+                    "reweight_num_denoising_steps_32",
+                    "reweight_num_denoising_steps_64",
+                    "reweight_num_denoising_steps_128",
+                    "reweight_num_denoising_steps_256",
+                    "reweight_num_denoising_steps_512",
+                    "reweight_num_denoising_steps_1024",
+                ],
+                task_set=["re34", "regex", "zdt2", "c10mop2", "mo_hopper_v2"],
+            )
+            moddom_results.to_parquet(args.output_path)
+
+        case "create-num-cond-point-tables":
+            moddom_results = load_moddom(
+                args.input_dir,
+                variants=[
+                    "reweight_num_points_4",
+                    "reweight_num_points_8",
+                    "reweight_num_points_16",
+                    "reweight-ref-dir",
+                    "reweight_num_points_64",
+                ],
+                task_set=["re34", "regex", "zdt2", "c10mop2", "mo_hopper_v2"],
+            )
+            create_num_cond_tables(moddom_results, args.output_path)
+            # moddom_results.to_parquet(args.output_path)
+        case "create-ode-tables":
+            moddom_results = load_moddom(
+                args.input_dir,
+                variants=[
+                    "deterministic_ode",
+                    "deterministic_ode_reweight",
+                    "reweight-ref-dir",
+                    "baseline-ref-dir",
+                ],
+                task_set=["re34", "regex", "zdt2", "c10mop2", "mo_hopper_v2"],
+            )
+            compute_ode_hvs(moddom_results, args.output_path, args.hv_percentile)
+
+        case "create-ref-dir-gen-tables":
+            # Create table between das-dennis and uniform sampling methods
+            moddom_results = load_moddom(
+                args.input_dir,
+                variants=["reweight-ref-dir", "reweight-das-dennis"],
+                task_set=["re34", "regex", "zdt2", "c10mop2", "mo_hopper_v2"],
+            )
+            create_ref_dir_gen_tables(moddom_results, args.output_path)
         case "create-ablation-df":
             moddom_results = load_moddom(args.input_dir, variants=args.moddom_variant)
             moddom_results.to_parquet(args.output_path)
@@ -871,25 +1048,6 @@ def compute_tables(args):
         case _:
             assert False, args.action
 
-    # moddom_results = load_moddom(args.input_dir, variants=args.moddom_variant)
-    # print(f"Moddom contains {moddom_results.shape[0]} rows!")
-    # if args.only_moddom:
-    #     df = moddom_results
-    # else:
-    #     baseline_results = load_baselines(args.input_dir)
-    #     print(f"Baseline contain {baseline_results.shape[0]} rows!")
-    #
-    #     paretoflow_results = load_paretoflow(args.input_dir)
-    #     print(f"Pareto-flow contains {paretoflow_results.shape[0]} rows!")
-    #
-    #     df = pd.concat((baseline_results, paretoflow_results, moddom_results))
-    #
-    # if args.save_df:
-    #     df.to_parquet(args.output_path)
-    #     print(f"Stored raw dataframe to {args.output_path!s}")
-    #
-    # TODO: Make figures for the ablation
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -902,6 +1060,11 @@ if __name__ == "__main__":
             "create-ablation-df",
             "create-main-table",
             "create-hv-tables",
+            "create-sampling-tables",
+            "create-ode-tables",
+            "create-num-cond-point-tables",
+            "create-denoising-steps-df",
+            "create-ref-dir-gen-tables",
         ],
         default="create-main-table",
     )
@@ -911,8 +1074,6 @@ if __name__ == "__main__":
         "--hv_percentile", type=str, choices=["hv_100th", "hv_75th", "hv_50th"]
     )
     parser.add_argument("--output_path", required=True, type=pathlib.Path, default=None)
-    # parser.add_argument("--save_df", action="store_true")
-    # parser.add_argument("--save_table", action="store_true")
     parser.add_argument("--only_moddom", action="store_true")
     parser.add_argument(
         "--moddom_variant",

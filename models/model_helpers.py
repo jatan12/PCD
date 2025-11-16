@@ -44,6 +44,7 @@ class TaskConfig:
     use_wandb: bool = False
     experiment_name: Optional[str] = None
     save_dir: Optional[pathlib.Path] = None
+    filepath: Optional[pathlib.Path] = None
 
 
 @dataclass
@@ -177,6 +178,9 @@ def parse_args() -> TaskConfig:
     parser.add_argument("--sampling-noise-scale", type=float, default=0.05)
     parser.add_argument("--save_dir", type=pathlib.Path, default=None)
     parser.add_argument("--gin_params", nargs="*", default=[])
+    parser.add_argument(
+            "--filepath", type=pathlib.Path, default=None
+    ) # Used only for loading pretrained models
 
     args = parser.parse_args()
     ConfigClass = get_task_config(args.domain)
@@ -209,6 +213,7 @@ def parse_args() -> TaskConfig:
         experiment_name=args.experiment_name,
         gin_params=args.gin_params,
         save_dir=save_dir,
+        filepath=args.filepath
     )
 
     return config
@@ -587,4 +592,5 @@ def sample_uniform_toward_ideal(
 #     sampled_points = base_points - alphas * ref_dirs
 #
 #     # Clip points within bounds
+    # TODO: make configurable
 #     return np.clip(sampled_points, bounds[0], bounds[1])

@@ -68,15 +68,12 @@ def load_diffusion_model(
         )
 
     model = construct_diffusion_model(
-        inputs,
-        normalizer_type=normalizer_type,
-        denoising_network=ResidualMLPDenoiser,
-        disable_terminal_norm=disable_terminal_norm,
-        skip_dims=skip_dims,
+        inputs=inputs,
         cond_dim=cond_dim,
     )
 
     state = torch.load(filepath, weights_only=True)
+    print(state.keys())
     model.load_state_dict(state["model"])
     model.eval()
     return model
