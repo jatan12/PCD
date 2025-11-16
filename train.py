@@ -9,10 +9,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 import torch
+import wandb
 from sklearn.model_selection import train_test_split
 
 import offline_moo.off_moo_bench as ob
-import wandb
 from models import diffusion_utils, elucidated_diffusion
 from models.model_helpers import (
     TaskConfig,
@@ -234,6 +234,8 @@ def sampling(
     diffusion,
     guidance_scale: float,
     d_best: np.ndarray,
+    noise_scale: float,
+    alpha_range: Tuple[float, float],
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Generate samples from the
@@ -269,7 +271,8 @@ def sampling(
             k=config.num_cond_points,
             ref_dir_method=config.ref_dir_method,
             num_points=config.num_pareto_solutions,
-            noise_scale=config.sampling_noise_scale
+            noise_scale=noise_scale,
+            alpha_range=alpha_range,
         )
     else:
         assert False, config.sampling_method
@@ -556,19 +559,73 @@ def main():
     trainer = train_diffusion(config, X, y)
     ema_model = trainer.ema.ema_model
 
-    # Sample the model with different guidance scales
-    res_x, res_y, cond_points = sampling(
-        task, config, ema_model, guidance_scale=config.guidance_scale, d_best=d_best
-    )
-    results = evaluation(task, config, res_y)
-    # results["guidance_scale"] = scale
-    results = {key: float(val) for key, val in results.items()}
+    all_results = []
+    all_points = {"d_best": d_best}
+    # Iterate over different noise scales
+    if len(config.sampling_alpha_range) > 1:
+        assert len(config.sampling_noise_scale) == 1
+        print("Iterating over different alpha ranges!")
+        for i, alpha_range in enumerate(config.sampling_alpha_range):
+            res_x, res_y, cond_points = sampling(
+                task,
+                config,
+                ema_model,
+                guidance_scale=config.guidance_scale,
+                d_best=d_best,
+                noise_scale=config.sampling_noise_scale[0],
+                alpha_range=alpha_range,
+            )
+            results = evaluation(task, config, res_y)
+            # results["guidance_scale"] = scale
+            results = {key: float(val) for key, val in results.items()}
+            results["alpha_min"] = alpha_range[0]
+            results["alpha_max"] = alpha_range[1]
+            results["res_id"] = i
 
-    if config.use_wandb:
-        wandb.log(results)
+            all_points[f"res_x_{i}"] = res_x
+            all_points[f"res_y_{i}"] = res_y
+            all_points[f"cond_points_{i}"] = cond_points
 
-    print()
-    print_results(results, config)
+            # if config.use_wandb:
+            #     wandb.log(results)
+            print()
+            print(f"Alpha Range {alpha_range[0]:.2f},{alpha_range[1]:.2f}")
+            print_results(results, config)
+
+            all_results.append(results)
+
+    # Otherwise assume that one is iterating over multiple noise scales
+    elif len(config.sampling_noise_scale) > 1:
+        assert len(config.sampling_alpha_range) == 1
+        for i, noise_scale in enumerate(config.sampling_noise_scale):
+            res_x, res_y, cond_points = sampling(
+                task,
+                config,
+                ema_model,
+                guidance_scale=config.guidance_scale,
+                d_best=d_best,
+                noise_scale=noise_scale,
+                alpha_range=config.sampling_alpha_range[0],
+            )
+            print(f"{noise_scale=}, {type(noise_scale)=}")
+            results = evaluation(task, config, res_y)
+            # results["guidance_scale"] = scale
+            results = {key: float(val) for key, val in results.items()}
+            results["noise_scale"] = noise_scale
+            results["res_id"] = i
+
+            all_points[f"res_x_{i}"] = res_x
+            all_points[f"res_y_{i}"] = res_y
+            all_points[f"cond_points_{i}"] = cond_points
+
+            print()
+            print(f"Noise scale {noise_scale:.2f}")
+            print_results(results, config)
+
+            all_results.append(results)
+
+    else:
+        assert False, "Either noise scale or alpha range must contain multiple values!"
 
     if config.save_dir is not None:
         # Save the configuration
@@ -604,35 +661,13 @@ def main():
         with (config.save_dir / "config.json").open("w") as ofstream:
             json.dump(cfg_dct, ofstream)
 
-        res_y = np.asarray(res_y)
-        res_x = np.asarray(res_x)
-        cond_points = np.asarray(cond_points)
-
-        if config.normalize_ys:
-            plot_y = task.normalize_y(res_y)
-        else:
-            plot_y = res_y
-
         # Save the results and plot the D-best paretoflow + the actual points
-        plot_results(
-            d_best,
-            cond_points=cond_points,
-            res_y=plot_y,
-            config=config,
-            save_dir=config.save_dir,
-        )
 
-        np.savez(
-            config.save_dir / "data.npz",
-            d_best=d_best,
-            res_y=res_y,
-            res_x=res_x,
-            cond_points=cond_points,
-        )
+        np.savez(config.save_dir / "data.npz", **all_points)
 
         with (config.save_dir / "results.json").open("w") as ofstream:
             # Ensure that the results do not contain e.g. numpy objects
-            json.dump(results, ofstream)
+            json.dump(all_results, ofstream)
 
 
 if __name__ == "__main__":

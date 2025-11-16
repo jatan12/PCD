@@ -35,7 +35,10 @@ class TaskConfig:
     normalize_method_xs: str = "z-score"
     normalize_method_ys: str = "z-score"
     num_cond_points: int = 32
-    sampling_noise_scale: float = 0.05
+    sampling_noise_scale: List[float] = field(default_factory=lambda: [0.05])
+    sampling_alpha_range: List[Tuple[float, float]] = field(
+        default_factory=lambda: [(0.1, 0.4)]
+    )
     num_pareto_solutions: int = 256
     use_val_split: bool = True
     val_ratio: float = 0.2
@@ -175,12 +178,15 @@ def parse_args() -> TaskConfig:
         help='The name of the experiment. Used only if "--use_wandb" is set',
     )
     parser.add_argument("-k", "--num-cond-points", type=int, default=32)
-    parser.add_argument("--sampling-noise-scale", type=float, default=0.05)
+    parser.add_argument("--sampling-noise-scale", nargs="*", type=float,default=[0.05])
+    parser.add_argument("--sampling-min-alpha-range", nargs="*", type=float, default=[0.1])
+    parser.add_argument("--sampling-max-alpha-range", nargs="*", type=float, default=[0.4])
+
     parser.add_argument("--save_dir", type=pathlib.Path, default=None)
     parser.add_argument("--gin_params", nargs="*", default=[])
     parser.add_argument(
-            "--filepath", type=pathlib.Path, default=None
-    ) # Used only for loading pretrained models
+        "--filepath", type=pathlib.Path, default=None
+    )  # Used only for loading pretrained models
 
     args = parser.parse_args()
     ConfigClass = get_task_config(args.domain)
@@ -198,6 +204,13 @@ def parse_args() -> TaskConfig:
     # Ensure that the directory exists
     save_dir.mkdir(parents=True, exist_ok=True)
 
+    sampling_alpha_range = [
+        (min_val, max_val)
+        for min_val, max_val in zip(
+            args.sampling_min_alpha_range, args.sampling_max_alpha_range
+        )
+    ]
+
     config = ConfigClass(
         seed=args.seed,
         task_name=args.task_name,
@@ -206,6 +219,7 @@ def parse_args() -> TaskConfig:
         ref_dir_method=args.sampling_ref_dir_method,
         reweight_loss=args.reweight_loss,
         sampling_noise_scale=args.sampling_noise_scale,
+        sampling_alpha_range=sampling_alpha_range,
         num_cond_points=args.num_cond_points,
         data_pruning=args.data_pruning,
         data_preserved_ratio=args.data_preserved_ratio,
@@ -213,7 +227,7 @@ def parse_args() -> TaskConfig:
         experiment_name=args.experiment_name,
         gin_params=args.gin_params,
         save_dir=save_dir,
-        filepath=args.filepath
+        filepath=args.filepath,
     )
 
     return config
@@ -398,9 +412,7 @@ def sample_along_ref_dirs(
     if ref_dir_method == "energy":
         ref_dirs = get_reference_directions("energy", d_best.shape[1], k, seed=seed)
     elif ref_dir_method == "das-dennis":
-        ref_dirs = get_reference_directions(
-            "uniform", d_best.shape[1], n_partitions=k
-        )
+        ref_dirs = get_reference_directions("uniform", d_best.shape[1], n_partitions=k)
     d_best = d_best.astype(np.float64)
     fronts, rank = NonDominatedSorting().do(
         d_best, return_rank=True, n_stop_if_ranked=k
@@ -592,5 +604,5 @@ def sample_uniform_toward_ideal(
 #     sampled_points = base_points - alphas * ref_dirs
 #
 #     # Clip points within bounds
-    # TODO: make configurable
+# TODO: make configurable
 #     return np.clip(sampled_points, bounds[0], bounds[1])
