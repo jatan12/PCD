@@ -238,7 +238,7 @@ def sampling_v2(task, x, y, diffusion, guidance_scale: float):
     if task.dataset_name == "re21":
         selected_ranks = [0, 50, 100, 150]
     else:
-        selected_ranks = [0, 50, 100, 150]
+        selected_ranks = [10, 20, 30, 40]
 
     for i, rank_i in enumerate(selected_ranks):
         mask = ranks == rank_i
