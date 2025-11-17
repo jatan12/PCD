@@ -235,7 +235,12 @@ def sampling_v2(task, x, y, diffusion, guidance_scale: float):
 
     all_points = {}
 
-    for i, rank_i in enumerate([0, 100, 200, 300, 400, 500]):
+    if task.dataset_name == "re21":
+        selected_ranks = [0, 50, 100, 150]
+    else:
+        selected_ranks = [0, 50, 100, 150]
+
+    for i, rank_i in enumerate(selected_ranks):
         mask = ranks == rank_i
         if mask.sum() == 0:
             print(f"SKipping rank {rank_i} sine there are no samples!")
