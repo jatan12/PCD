@@ -9,16 +9,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 import torch
+import wandb
 from sklearn.model_selection import train_test_split
 
 import offline_moo.off_moo_bench as ob
-import wandb
 from models import diffusion_utils, elucidated_diffusion
 from models.model_helpers import (
     TaskConfig,
     get_slurm_job_id,
     get_slurm_task_id,
     parse_args,
+    reweight_crowding,
     reweight_multi_objective,
     sample_along_ref_dirs,
     sample_uniform_direction,
@@ -188,6 +189,15 @@ def train_diffusion(
             f" mu {weights.mean():.2f}, sd {np.std(weights):.2f}, ({weights.min():.2f}, {weights.max():.2f})"
         )
         weights_tensor = torch.from_numpy(weights).float()
+
+    elif config.reweight_crowding:
+        print("Using Crowding reweighted loss")
+        weights = reweight_crowding(y_train)
+        print(
+            f" mu {weights.mean():.2f}, sd {np.std(weights):.2f}, ({weights.min():.2f}, {weights.max():.2f})"
+        )
+        weights_tensor = torch.from_numpy(weights).float()
+
     else:
         print("Using standard loss")
         weights_tensor = torch.ones(X_train_tensor.shape[0]).float()
@@ -269,7 +279,7 @@ def sampling(
             k=config.num_cond_points,
             ref_dir_method=config.ref_dir_method,
             num_points=config.num_pareto_solutions,
-            noise_scale=config.sampling_noise_scale
+            noise_scale=config.sampling_noise_scale,
         )
     else:
         assert False, config.sampling_method
