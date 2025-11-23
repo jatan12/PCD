@@ -270,7 +270,8 @@ def variant_to_method(variant):
             return "pcd-ode-sampling"
         case "deterministic_ode_reweight":
             return "pcd-reweight-ode-sampling"
-
+        case "reweight-crowding":
+            return variant
         case (
             "reweight_num_denoising_steps_32"
             | "reweight_num_denoising_steps_64"
@@ -815,6 +816,59 @@ def compute_per_task_hvs(df: pd.DataFrame, output_dir: pathlib.Path, percentile:
         print(f"{key!r} done!")
 
 
+def create_crowding_table(df: pd.DataFrame, output_dir: pathlib.Path):
+    df.rename(columns={"name": "method"}, errors="raise", inplace=True)
+    df.loc[:, "task"] = df.task.map(TASK_RENAMES)
+
+    per_points_df = (
+        df.groupby(["task", "method"], as_index=False)["hv_100th"]
+        .agg(["mean", "std"])
+        .reset_index(drop=True)
+    )
+    per_points_df.loc[:, "value"] = (
+        "$"
+        + per_points_df.loc[:, "mean"].apply(lambda x: f"{x:.2f}")
+        + r"\pm"
+        + per_points_df.loc[:, "std"].apply(lambda x: f"{x:.2f}")
+        + "$"
+    )
+
+    print(per_points_df)
+
+    per_points_df.loc[:, "method"] = per_points_df.method.map(
+        {
+            "reweight-crowding": "Crowding distance reweight",
+            "pc-diffusion-reweight-ref-dir": "Dominance number reweight",
+        }
+    )
+
+    per_task_hv = per_points_df.pivot(index="task", columns="method", values=["value"])
+
+    # per_task_hv = per_points_df.pivot(index="method", columns="task", values=["value"])
+    # per_task_hv = per_task_hv.set_index(
+    #     per_task_hv.index.map(
+    #         {
+    #             "reweight-crowding": "Crowding distance reweight",
+    #             "pc-diffusion-reweight-ref-dir": "Dominance number reweight",
+    #         }
+    #     ),
+    #     drop=True,
+    # )
+
+    print(per_task_hv)
+    per_task_hv.to_markdown(output_dir / "crowding_table.md")
+
+    s = per_task_hv.style.apply(highlight_max_mean, props="textbf:--rwrap").apply(
+        highlight_second_highest_mean, props="underline:--rwrap;"
+    )
+    column_format = "l" + "c" * len(per_task_hv.columns)
+    s.to_latex(
+        output_dir / "crowding.tex",
+        hrules=True,
+        column_format=column_format,
+    )
+
+
 def compute_avg_rank_tables(
     df: pd.DataFrame,
     rank_precision: int | None,
@@ -974,6 +1028,23 @@ def compute_tables(args):
             guidance_results = load_moddom_guidance_scales(args.input_dir)
             guidance_results.to_parquet(args.output_path)
 
+        case "create-crowding-table":
+            moddom_results = load_moddom(
+                args.input_dir,
+                variants=["reweight-ref-dir", "reweight-crowding"],
+                task_set=[
+                    "re34",
+                    "zdt1",
+                    "zdt3",
+                    "dtlz1",
+                    "dtlz7",
+                    "zdt2",
+                    "c10mop2",
+                    "mo_hopper_v2",
+                ],
+            )
+            create_crowding_table(moddom_results, args.output_path)
+
         case "create-denoising-steps-df":
             moddom_results = load_moddom(
                 args.input_dir,
@@ -1065,6 +1136,7 @@ if __name__ == "__main__":
             "create-num-cond-point-tables",
             "create-denoising-steps-df",
             "create-ref-dir-gen-tables",
+            "create-crowding-table",
         ],
         default="create-main-table",
     )
