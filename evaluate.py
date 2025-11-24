@@ -1,5 +1,6 @@
 import datetime
 import json
+import pathlib
 from dataclasses import asdict
 from pprint import pprint
 from typing import Dict, Tuple
@@ -7,7 +8,6 @@ from typing import Dict, Tuple
 import gin
 import numpy as np
 import torch
-import pathlib
 from sklearn.model_selection import train_test_split
 
 import offline_moo.off_moo_bench as ob
@@ -106,8 +106,12 @@ def create_task(
 
     return task, X, y, d_best
 
+
 def sampling(
-    task, config, diffusion, d_best: np.ndarray, 
+    task,
+    config,
+    diffusion,
+    d_best: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Generate samples from the
@@ -173,6 +177,7 @@ def sampling(
 
     return res_x, res_y
 
+
 def evaluation(
     task,
     config,
@@ -229,6 +234,7 @@ def evaluation(
 
     return results
 
+
 def setup_wandb(config):
     now = datetime.datetime.now()
     ts = now.strftime("%Y-%m-%dT%H-%M")
@@ -271,8 +277,6 @@ def setup_wandb(config):
     )
 
 
-
-
 def print_results(results, config):
     print("-" * 40)
     print(f"Task: {config.task_name.upper()}")
@@ -301,9 +305,10 @@ def main():
         setup_wandb(config)
 
     task, X, y, d_best = create_task(config)
-    
-    diffusion_utils.load_pretrained_model(config.filepath, X)
+
+    trainer = train_diffusion(config, X, y)
     ema_model = trainer.ema.ema_model
+
 
     res_x, res_y = sampling(task, config, ema_model, d_best)
     results = evaluation(task, config, res_y)

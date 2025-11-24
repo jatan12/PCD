@@ -52,8 +52,8 @@ def construct_diffusion_model(
 def load_diffusion_model(
     filepath: Union[str, pathlib.Path],
     inputs: torch.Tensor,
-    normalizer_type: str,
-    disable_terminal_norm: bool = False,
+    # normalizer_type: str,
+    # disable_terminal_norm: bool = False,
     skip_dims: Optional[List[int]] = None,
     cond_dim: Optional[int] = None,
 ) -> ElucidatedDiffusion:

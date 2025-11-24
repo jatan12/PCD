@@ -13,8 +13,8 @@ results/
 .vscode/
 
 # Jupyter notebook stuff
-.virtual_documents/*
-.ipynb_checkpoints/*
+**/.virtual_documents/*
+**/.ipynb_checkpoints/*
 
 # Slurm scripts
 slurm_scripts/

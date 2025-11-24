@@ -11,12 +11,12 @@ import numpy as np
 import scipy
 import torch
 from pygmo import fast_non_dominated_sorting
-
-# from pymoo.algorithms.moo.nsga2 import calc_crowding_distance
 from pymoo.algorithms.moo.nsga3 import calc_niche_count
 from pymoo.factory import get_reference_directions
 from pymoo.util.function_loader import load_function
 from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
+
+from .moo_utils import calc_crowding_distance
 
 
 @dataclass
@@ -28,6 +28,7 @@ class TaskConfig:
     ref_dir_method: Literal["das-dennis", "energy"] = "energy"
     guidance_scale: float = 1.0
     reweight_loss: bool = False
+    reweight_crowding: bool = False
     data_pruning: bool = False
     data_preserved_ratio: float = 0.2
     normalize_xs: bool = False
@@ -143,6 +144,11 @@ def parse_args() -> TaskConfig:
         help="Enable loss reweighting based on dominance number",
     )
     parser.add_argument(
+        "--reweight-crowding",
+        action="store_true",
+        help="Enable loss reweighting based on crowding distance",
+    )
+    parser.add_argument(
         "--data_pruning", action="store_true", help="Enable pruning of dominated data"
     )
     parser.add_argument(
@@ -179,8 +185,8 @@ def parse_args() -> TaskConfig:
     parser.add_argument("--save_dir", type=pathlib.Path, default=None)
     parser.add_argument("--gin_params", nargs="*", default=[])
     parser.add_argument(
-            "--filepath", type=pathlib.Path, default=None
-    ) # Used only for loading pretrained models
+        "--filepath", type=pathlib.Path, default=None
+    )  # Used only for loading pretrained models
 
     args = parser.parse_args()
     ConfigClass = get_task_config(args.domain)
@@ -205,6 +211,7 @@ def parse_args() -> TaskConfig:
         guidance_scale=args.sampling_guidance_scale,
         ref_dir_method=args.sampling_ref_dir_method,
         reweight_loss=args.reweight_loss,
+        reweight_crowding=args.reweight_crowding,
         sampling_noise_scale=args.sampling_noise_scale,
         num_cond_points=args.num_cond_points,
         data_pruning=args.data_pruning,
@@ -213,7 +220,7 @@ def parse_args() -> TaskConfig:
         experiment_name=args.experiment_name,
         gin_params=args.gin_params,
         save_dir=save_dir,
-        filepath=args.filepath
+        filepath=args.filepath,
     )
 
     return config
@@ -262,6 +269,65 @@ def get_pareto_front(y):
     )  # Use "efficient_non_dominated_sort" for larger datasets
     front_indices = nds.do(y, only_non_dominated_front=True)
     return y[front_indices], front_indices
+
+
+def reweight_crowding(
+    scores: np.ndarray,
+    num_bins: int = 20,
+    k: float = 10,
+    tau: float = 0.05,
+    maximize: bool = False,
+    normalize_dom_counts: bool = True,
+) -> np.ndarray:
+    
+    # Query the parameters from the dominance count config
+    k = gin.query_parameter("reweight_multi_objective.k")
+    tau = gin.query_parameter("reweight_multi_objective.tau")
+    num_bins = gin.query_parameter("reweight_multi_objective.num_bins")
+
+    scores_proc = scores.copy()
+
+    # Do NDS for the points
+    _, _, dc, _ = fast_non_dominated_sorting(points=scores_proc)
+
+    # Go over each front, and compute the crowding distance for each of them
+    n_fronts = dc.max()
+    dist_weights = np.zeros(scores_proc.shape[0])
+    for i in range(n_fronts):
+        mask = dc == i
+
+        f = scores_proc[mask, ...]
+        dists = calc_crowding_distance(f)
+
+        dist_weights[mask] = dists
+        # Compute crowding distance for points belonging to this front
+
+    # distances for some points are set to inf -> Set them to the maximum
+    # distance found in the data
+    inf_mask = np.isinf(dist_weights)
+    max_no_inf = np.max(dist_weights, where=~inf_mask, initial=0)
+    dist_weights = np.where(inf_mask, max_no_inf, dist_weights)
+    dist_weights = (dist_weights - dist_weights.min()) / (dist_weights.max() - dist_weights.min())
+
+
+    # Perform the reweighting
+    hist, _, binnum = scipy.stats.binned_statistic_dd(
+        scores_proc,
+        values=None,
+        statistic="count",
+        bins=num_bins,
+        expand_binnumbers=False,
+    )
+    weights = np.zeros_like(dist_weights)
+    unique_bins = np.unique(binnum)
+    for i in range(unique_bins.shape[0]):
+        mask = binnum == unique_bins[i]
+        n_items = mask.sum()
+        weights[mask] = n_items / (n_items + k) * np.exp(dist_weights[mask].mean() / tau)
+
+    return weights
+
+
 
 
 @gin.configurable(denylist=["scores", "maximize"])
@@ -398,9 +464,7 @@ def sample_along_ref_dirs(
     if ref_dir_method == "energy":
         ref_dirs = get_reference_directions("energy", d_best.shape[1], k, seed=seed)
     elif ref_dir_method == "das-dennis":
-        ref_dirs = get_reference_directions(
-            "uniform", d_best.shape[1], n_partitions=k
-        )
+        ref_dirs = get_reference_directions("uniform", d_best.shape[1], n_partitions=k)
     d_best = d_best.astype(np.float64)
     fronts, rank = NonDominatedSorting().do(
         d_best, return_rank=True, n_stop_if_ranked=k
@@ -592,5 +656,5 @@ def sample_uniform_toward_ideal(
 #     sampled_points = base_points - alphas * ref_dirs
 #
 #     # Clip points within bounds
-    # TODO: make configurable
+# TODO: make configurable
 #     return np.clip(sampled_points, bounds[0], bounds[1])
