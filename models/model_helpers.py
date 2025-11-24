@@ -326,7 +326,7 @@ def reweight_crowding(
         weights[mask] = n_items / (n_items + k) * np.exp(dist_weights[mask].mean() / tau)
 
     # A hack to ensure that the weights don't get wildly high values
-    mask = weights > 1e4
+    mask = weights > 1e3
     if mask.sum() > 0:
         max_val = np.max(weights, where=~mask, initial=0.0)
         weights = np.where(mask, max_val, weights)
