@@ -266,10 +266,10 @@ def variant_to_method(variant):
             return "pc-diffusion-pruning"
         case "reweight":
             return "pc-diffusion-reweight"
-        case "deterministic_ode":
-            return "pcd-ode-sampling"
-        case "deterministic_ode_reweight":
-            return "pcd-reweight-ode-sampling"
+        case "deterministic_ode" | "deterministic-ode":
+            return variant
+        case "deterministic_ode_reweight" | "reweight-deterministic-ode":
+            return variant
 
         case (
             "reweight_num_denoising_steps_32"
@@ -285,11 +285,21 @@ def variant_to_method(variant):
             | "reweight_num_points_8"
             | "reweight_num_points_16"
             | "reweight_num_points_64"
+            | "reweight-num-cond-points-4"
+            | "reweight-num-cond-points-8"
+            | "reweight-num-cond-points-16"
+            | "reweight-num-cond-points-64"
         ):
             return variant
         case "reweight-das-dennis":
             return variant
         case "d-best" | "reweight-d-best":
+            return variant
+        case "alpha-range":
+            return variant
+        case "noise-scale":
+            return variant
+        case "reweight_m_4" | "reweight_m_5" | "reweight_m_6":
             return variant
         case _:
             assert False, variant
@@ -557,21 +567,37 @@ def load_moddom(data_dir: pathlib.Path, variants: str, task_set=None):
                         continue
                     hypervolumes = load_json(result_dir / "results.json")
 
-                    # Detemine the format of th hypervolumes (i.e. single dict or dict of dicts)
-                    _val = next(iter(hypervolumes.values()))
-                    if isinstance(_val, dict):
-                        hypervolumes = hypervolumes["2.5"]
-                    del _val
+                    # Detemine the format of the hypervolumes
+                    # (i.e. list of dicts, single dict or dict of dicts)
+                    if isinstance(hypervolumes, list):
+                        for hv in hypervolumes:
+                            results.append(
+                                {
+                                    "task": task,
+                                    "domain": domain,
+                                    "name": method,
+                                    "seed": seed,
+                                    **hv,
+                                }
+                            )
 
-                    results.append(
-                        {
-                            "task": task,
-                            "domain": domain,
-                            "name": method,
-                            "seed": seed,
-                            **hypervolumes,
-                        }
-                    )
+                    elif isinstance(hypervolumes, dict):
+                        _val = next(iter(hypervolumes.values()))
+                        if isinstance(_val, dict):
+                            hypervolumes = hypervolumes["2.5"]
+                        del _val
+
+                        results.append(
+                            {
+                                "task": task,
+                                "domain": domain,
+                                "name": method,
+                                "seed": seed,
+                                **hypervolumes,
+                            }
+                        )
+                    else:
+                        assert False, hypervolumes
         print(f"=== Domain {domain} done =====")
     return pd.DataFrame(results)
 
@@ -673,6 +699,50 @@ def create_num_cond_tables(df: pd.DataFrame, output_dir: pathlib.Path):
     )
 
 
+def create_num_obj_tables(df: pd.DataFrame, output_dir: pathlib.Path):
+    num_obj = {
+        "pc-diffusion-reweight-ref-dir": 3,
+        "reweight_m_4": 4,
+        "reweight_m_5": 5,
+        "reweight_m_6": 6,
+    }
+    df.loc[:, "num_obj"] = df.name.map(num_obj)
+    print(df)
+    df.loc[:, "num_obj"] = df.num_obj.astype(int)
+
+    df.loc[:, "hv_ratio"] = (
+        df.loc[:, "hv_100th"].to_numpy() / df.loc[:, "hv_d_best"].to_numpy()
+    )
+
+    per_task_df = (
+        df.groupby(["task", "num_obj"], as_index=False)["hv_ratio"]
+        .agg(["mean", "std"])
+        .reset_index(drop=True)
+    )
+
+    per_task_df.loc[:, "value"] = (
+        per_task_df.loc[:, "mean"].apply(lambda x: f"{x:.2f}")
+        + r"$\pm$"
+        + per_task_df.loc[:, "std"].apply(lambda x: f"{x:.2f}")
+    )
+
+    print(per_task_df)
+    per_task_df = per_task_df.pivot(index="task", columns="num_obj", values=["value"])
+    per_task_df = per_task_df.set_index(
+        per_task_df.index.map(
+            {
+                "dtlz1": "DTLZ1",
+                "dtlz7": "DTLZ7",
+            }
+        ),
+        drop=True,
+    )
+    column_format = "l" + "c" * len(per_task_df.columns)
+    per_task_df.style.to_latex(
+        output_dir / "num_obj_ablation.tex", hrules=True, column_format=column_format
+    )
+
+
 def create_ref_dir_gen_tables(df: pd.DataFrame, output_dir: pathlib.Path):
     df.rename(columns={"name": "method"}, errors="raise", inplace=True)
     df.loc[:, "task"] = df.task.map(TASK_RENAMES)
@@ -720,11 +790,38 @@ def compute_ode_hvs(df: pd.DataFrame, output_dir: pathlib.Path, percentile: str)
     df.loc[:, "domain"] = df.task.map(TASK_TO_DOMAIN)
     task_set = df.task.unique().tolist()
     print(task_set)
-    hv_df = get_per_task_hvs(df, task_set, include_d_best=False)
-    s = hv_df.style.apply(highlight_max_mean, props="textbf:--rwrap").apply(
+
+    df.rename(columns={"name": "method"}, errors="raise", inplace=True)
+
+    df.loc[:, "task"] = df.task.map(TASK_RENAMES)
+
+    per_task_df = (
+        df.groupby(["task", "method"], as_index=False)["hv_100th"]
+        .agg(["mean", "std"])
+        .reset_index(drop=True)
+    )
+
+    per_task_df.loc[:, "value"] = (
+        per_task_df.loc[:, "mean"].apply(lambda x: f"{x:.2f}")
+        + r"$\pm$"
+        + per_task_df.loc[:, "std"].apply(lambda x: f"{x:.2f}")
+    )
+
+    print(per_task_df)
+    per_task_df = per_task_df.pivot(index="method", columns="task", values=["value"])
+    per_task_df = per_task_df.set_index(per_task_df.index.map({
+        "deterministic-ode": "Deterministic PCD (w/o reweighing)",
+        "reweight-deterministic-ode": "Deterministic PCD",
+        "pc-diffusion-ref-dir": "Stochastic PCD (w/o reweighting)",
+        "pc-diffusion-reweight-ref-dir": "Stochastic PCD",
+    }), drop=True)
+
+    print(per_task_df)
+
+    s = per_task_df.style.apply(highlight_max_mean, props="textbf:--rwrap").apply(
         highlight_second_highest_mean, props="underline:--rwrap;"
     )
-    column_format = "l" + "c" * len(hv_df.columns)
+    column_format = "l" + "c" * len(per_task_df.columns)
     s.to_latex(
         output_dir / f"ode_sampling_{percentile}.tex",
         hrules=True,
@@ -989,26 +1086,71 @@ def compute_tables(args):
             )
             moddom_results.to_parquet(args.output_path)
 
+        case "create-alpha-range-df":
+            moddom_results = load_moddom(
+                args.input_dir,
+                variants=["reweight-ref-dir", "alpha-range"],
+                task_set=[
+                    "re21",
+                    "re22",
+                    "re23",
+                    "re34",
+                    "zdt2",
+                    "c10mop2",
+                    "mo_hopper_v2",
+                ],
+            )
+            moddom_results.to_parquet(args.output_path / "alpha_range.parquet")
+        case "create-noise-scale-df":
+            moddom_results = load_moddom(
+                args.input_dir,
+                variants=["noise-scale"],
+                task_set=[
+                    "re21",
+                    "re22",
+                    "re23",
+                    "re34",
+                    "zdt2",
+                    "c10mop2",
+                    "mo_hopper_v2",
+                ],
+            )
+            moddom_results.to_parquet(args.output_path / "noise_scale.parquet")
+
+        case "create-num-obj-df":
+            moddom_results = load_moddom(
+                args.input_dir,
+                variants=[
+                    "reweight-ref-dir",
+                    "reweight_m_4",
+                    "reweight_m_5",
+                    "reweight_m_6",
+                ],
+                task_set=["dtlz1", "dtlz7"],
+            )
+
+            create_num_obj_tables(moddom_results, args.output_path)
         case "create-num-cond-point-tables":
             moddom_results = load_moddom(
                 args.input_dir,
                 variants=[
-                    "reweight_num_points_4",
-                    "reweight_num_points_8",
-                    "reweight_num_points_16",
+                    "reweight-num-cond-points-4",
+                    "reweight-num-cond-points-8",
+                    "reweight-num-cond-points-16",
                     "reweight-ref-dir",
-                    "reweight_num_points_64",
+                    "reweight-num-cond-points-64",
                 ],
                 task_set=["re34", "regex", "zdt2", "c10mop2", "mo_hopper_v2"],
             )
-            create_num_cond_tables(moddom_results, args.output_path)
-            # moddom_results.to_parquet(args.output_path)
+
+            #create_num_cond_tables(moddom_results, args.output_path)
+            moddom_results.to_parquet(args.output_path / "num_cond_points.parquet")
         case "create-ode-tables":
             moddom_results = load_moddom(
                 args.input_dir,
                 variants=[
-                    "deterministic_ode",
-                    "deterministic_ode_reweight",
+                    "deterministic-ode",
+                    "reweight-deterministic-ode",
                     "reweight-ref-dir",
                     "baseline-ref-dir",
                 ],
@@ -1065,6 +1207,9 @@ if __name__ == "__main__":
             "create-num-cond-point-tables",
             "create-denoising-steps-df",
             "create-ref-dir-gen-tables",
+            "create-noise-scale-df",
+            "create-alpha-range-df",
+            "create-num-obj-df",
         ],
         default="create-main-table",
     )
