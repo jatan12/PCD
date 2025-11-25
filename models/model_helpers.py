@@ -324,12 +324,16 @@ def reweight_crowding(
         mask = binnum == unique_bins[i]
         n_items = mask.sum()
         weights[mask] = n_items / (n_items + k) * np.exp(dist_weights[mask].mean() / tau)
-
-    # A hack to ensure that the weights don't get wildly high values
-    mask = weights > 1e3
+    
+    # Clip the weights to ensure stable training
+    mask = weights > 10
     if mask.sum() > 0:
         max_val = np.max(weights, where=~mask, initial=0.0)
-        weights = np.where(mask, max_val, weights)
+        print(
+            f"Masking {mask.sum()} elements. "
+            "Real max {np.max(weights):.2f} -> Clip to {max_val:.2f}"
+        )
+        weights = np.clip(weights, a_max=max_val)
 
     return weights
 
