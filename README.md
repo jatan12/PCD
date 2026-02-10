@@ -97,3 +97,15 @@ python train.py --task_name c10mop2 --seed 2000 --domain monas --sampling-method
 ```
 
 The results from the paper are performed for all tasks & with seeds 1000, 2000, 3000, 4000, 5000
+
+## 📖 BibTeX
+```
+@inproceedings{
+	shrestha2026paretoconditioned,
+	title={Pareto-Conditioned Diffusion Models for Offline Multi-Objective Optimization},
+	author={Jatan Shrestha and Santeri Heiskanen and Kari Hepola and Severi Rissanen and Pekka Jääskeläinen and Joni Pajarinen},
+	booktitle={The Fourteenth International Conference on Learning Representations},
+	year={2026},
+	url={https://openreview.net/forum?id=S2Q00li155}
+}
+```
