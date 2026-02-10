@@ -1,4 +1,4 @@
-# Pareto-Conditioned Diffusion models
+<div align="center"> <h2>Pareto-Conditioned Diffusion models</h2></div>
 
 ### <div align="center"> ICLR2026 (Oral) <div>
 
