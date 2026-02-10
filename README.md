@@ -1,6 +1,33 @@
-## Pareto-Conditioned Diffusion models
+# Pareto-Conditioned Diffusion models
 
-### Installation
+### <div align="center"> ICLR2026 (Oral) <div>
+
+<div align="center">
+  <a href="https://sites.google.com/view/pcd-iclr26/"><img src="https://img.shields.io/static/v1?label=Website&message=PCD&color=darkred&logo=github-pages"></a> &ensp;
+  <a href="https://arxiv.org/abs/2602.00737"><img src="https://img.shields.io/static/v1?label=arXiv&message=PCD&color=red&logo=arxiv"></a> &ensp;
+</div>
+
+<p align="center" border-radius="10px">
+  <img src="assets/pcd_teaser.png" width="90%" alt="teaser_page1"/>
+</p>
+
+This is the official Pytorch implementation of [Pareto-Conditioned Diffusion Models for Offline Multi-Objective Optimization](), presented at ICLR2026. 
+
+PCD frames the multi-objective offline optimization as a conditional sampling problem, offering an end-to-end
+framework that does not require surrogate models. This is achieved via two key steps:
+
+1. Reweighting dataset based on the dominance relation of the points.
+2. Generating novel conditionioning points based on the best point in the offline data.
+
+<p align="center" border-radius="10px">
+    <img src="assets/pcd_perf.png" width="90%" alt="main table from paper"/>
+</p>
+
+The main results indicate that PCD is highly competetive & consistent across various tasks,
+while using only one set of _untuned hyperparameters_. This is crucial, as hyperparameter
+tuning is inherintly difficult in offline setting.
+
+## Installation
 This code base builds on top off [Offline-moo](https://github.com/lamba-bbo/offline-moo), 
 and thus one needs to install it first. To make this process easier, the exact version
 of offline-moo used in our case is included in `offline_moo/data`.
@@ -50,9 +77,8 @@ from [Offline-moo](https://github.com/lamda-bbo/offline-moo)
 After installing the required dependencies, download the offline data from [google-drive](https://drive.google.com/drive/folders/1SvU-p4Q5KAjPlHrDJ0VGiU2Te_v9g3rT) and place them in `offline_moo/data`.
 (Note: experiments shown in the paper utilized the data_fix_250508 version of the dataset.)
 
-
-### Reproducing result
-Below a few examples from the paper are shown:
+## Reproducing results
+Below are few examples to get you started 
 
 Train & evaluate PCDiffusion in ZDT2. 
 ```bash
