@@ -1,6 +1,6 @@
 <div align="center"> <h2>Pareto-Conditioned Diffusion Models for Offline Multi-Objective Optimization</h2></div>
 
-### <div align="center"> ICLR2026 (Oral) <div>
+### <div align="center"> ICLR 2026 (Oral) <div>
 
 <div align="center">
   <a href="https://sites.google.com/view/pcd-iclr26/"><img src="https://img.shields.io/static/v1?label=Website&message=PCD&color=darkred&logo=github-pages"></a> &ensp;
@@ -11,21 +11,18 @@
   <img src="assets/pcd_teaser.png" width="90%" alt="teaser_page1"/>
 </p>
 
-This is the official Pytorch implementation of [Pareto-Conditioned Diffusion Models for Offline Multi-Objective Optimization](), presented at ICLR2026. 
+This is the official PyTorch implementation of [Pareto-Conditioned Diffusion Models for Offline Multi-Objective Optimization](https://openreview.net/forum?id=S2Q00li155), presented at ICLR 2026. 
 
-PCD frames the multi-objective offline optimization as a conditional sampling problem, offering an end-to-end
-framework that does not require surrogate models. This is achieved via two key steps:
+**Pareto-Conditioned Diffusion (PCD)** reframes offline multi-objective optimization as a conditional sampling problem.
 
-1. Reweighting dataset based on the dominance relation of the points.
-2. Generating novel conditionioning points based on the best point in the offline data.
+- **Training**: Employs a novel reweighting strategy to emphasize high-quality solutions near the Pareto front.
+- **Sampling**: Directly generates novel designs conditioned on target objectives, sidestepping the need for explicit surrogate models.
 
 <p align="center" border-radius="10px">
     <img src="assets/pcd_perf.png" width="90%" alt="main table from paper"/>
 </p>
 
-The main results indicate that PCD is highly competetive & consistent across various tasks,
-while using only one set of _untuned hyperparameters_. This is crucial, as hyperparameter
-tuning is inherintly difficult in offline setting.
+**PCD** achieves highly competitive performance and demonstrates greater consistency across diverse tasks than existing approaches, using a single set of hyperparameters.
 
 ## Installation
 This code base builds on top off [Offline-moo](https://github.com/lamba-bbo/offline-moo), 
@@ -103,7 +100,7 @@ The results from the paper are performed for all tasks & with seeds 1000, 2000, 
 @inproceedings{
 	shrestha2026paretoconditioned,
 	title={Pareto-Conditioned Diffusion Models for Offline Multi-Objective Optimization},
-	author={Jatan Shrestha and Santeri Heiskanen and Kari Hepola and Severi Rissanen and Pekka Jääskeläinen and Joni Pajarinen},
+	author={Jatan Shrestha and Santeri Heiskanen and Kari Hepola and Severi Rissanen and Pekka J{\"a}{\"a}skel{\"a}inen and Joni Pajarinen},
 	booktitle={The Fourteenth International Conference on Learning Representations},
 	year={2026},
 	url={https://openreview.net/forum?id=S2Q00li155}
