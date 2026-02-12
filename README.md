@@ -1,4 +1,5 @@
-<div align="center"> <h2>Pareto-Conditioned Diffusion Models for Offline Multi-Objective Optimization</h2></div>
+<div align="center"> <h2>Pareto-Conditioned Diffusion Models for<br>
+	Offline Multi-Objective Optimization</h2></div>
 
 ### <div align="center"> ICLR 2026 (Oral) <div>
 
