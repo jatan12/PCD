@@ -20,7 +20,7 @@ framework that does not require surrogate models. This is achieved via two key s
 2. Generating novel conditionioning points based on the best point in the offline data.
 
 <p align="center" border-radius="10px">
-    <img src="assets/pcd_perf.png" width="90%" alt="main table from paper"/>
+    <img src="assets/pcd_main_table.png" width="90%" alt="main table from paper"/>
 </p>
 
 The main results indicate that PCD is highly competetive & consistent across various tasks,
